@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { User, Trade, Lesson } = require('./database');
 const { getVerifiedPrice } = require('./market');
 const { analyzeLesson } = require('./agent');
-const { logger } = require('./logger');
+const logger = { info: (...a) => console.log('[INFO]', ...a), warn: (...a) => console.warn('[WARN]', ...a), error: (...a) => console.error('[ERROR]', ...a), debug: (...a) => process.env.NODE_ENV !== 'production' && console.log('[DEBUG]', ...a) };
 
 // ==================== OPEN TRADE ====================
 async function openTrade(userId, tradeData) {
