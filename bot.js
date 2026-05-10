@@ -479,8 +479,12 @@ bot.on('callback_query', async (query) => {
       const coinData = allCoins.find(c => c.symbol === sym) || { symbol: sym, rank: 99 };
       let price = coinData.price;
       if (!price) { const pd = await getVerifiedPrice(sym + '/USDT').catch(() => null); price = pd?.price || 0; }
+      const scanRes2 = await scanMarket('daily').catch(() => null);
+      const scanOpp2 = scanRes2?.opportunities?.find(o => o.symbol === sym + '/USDT');
+      const scanConfidence2 = scanOpp2?.confidence || null;
       const analysis = await deepAnalysis(sym, {
         ...coinData, price,
+        scanConfidence: scanConfidence2,
         mtf: mtf.status === 'fulfilled' ? mtf.value : {},
         backtest: backtest.status === 'fulfilled' ? backtest.value : {},
         onChain: onChain.status === 'fulfilled' ? onChain.value : {}

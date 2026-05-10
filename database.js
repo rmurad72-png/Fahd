@@ -1,12 +1,20 @@
 /**
- * database.js — قاعدة البيانات الفهد v2
+ * database.js — قاعدة البيانات 🐆 الفهد v2
  */
 const mongoose = require('mongoose');
-const logger = { info: (...a) => console.log('[INFO]', ...a), warn: (...a) => console.warn('[WARN]', ...a), error: (...a) => console.error('[ERROR]', ...a), debug: (...a) => console.log('[DEBUG]', ...a) };
+// logger بسيط مدمج - لا يحتاج ملف خارجي
+const logger = {
+  info: (...a) => console.log('[INFO]', ...a),
+  warn: (...a) => console.warn('[WARN]', ...a),
+  error: (...a) => console.error('[ERROR]', ...a),
+  debug: (...a) => process.env.NODE_ENV !== 'production' && console.log('[DEBUG]', ...a)
+};
 
+// ==================== USER SCHEMA ====================
 const UserSchema = new mongoose.Schema({
   telegramId: { type: String, required: true, unique: true, index: true },
-  username: String, firstName: String,
+  username: String,
+  firstName: String,
   isActive: { type: Boolean, default: true },
   isAdmin: { type: Boolean, default: false },
   isBanned: { type: Boolean, default: false },
@@ -29,7 +37,8 @@ const UserSchema = new mongoose.Schema({
     dailyStopLoss: { type: Number, default: 3 },
     trailingStopPercent: { type: Number, default: 50 },
     dailyMaxDays: { type: Number, default: 11 },
-    alertsEnabled: { type: Boolean, default: true }
+    alertsEnabled: { type: Boolean, default: true },
+    language: { type: String, default: 'ar' }
   },
   stats: {
     totalTrades: { type: Number, default: 0 },
@@ -38,9 +47,11 @@ const UserSchema = new mongoose.Schema({
     cancelledOrders: { type: Number, default: 0 },
     totalPnL: { type: Number, default: 0 },
     bestTrade: { type: Number, default: 0 },
+    worstTrade: { type: Number, default: 0 },
     consecutiveLosses: { type: Number, default: 0 },
     totalLossFromPeak: { type: Number, default: 0 },
-    monthlyPnL: { type: Number, default: 0 }
+    monthlyPnL: { type: Number, default: 0 },
+    lastMonthReset: { type: Date, default: Date.now }
   },
   security: {
     requestCount: { type: Number, default: 0 },
@@ -49,6 +60,7 @@ const UserSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+// ==================== TRADE SCHEMA ====================
 const TradeSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   tradeId: { type: String, required: true, unique: true },
@@ -56,47 +68,74 @@ const TradeSchema = new mongoose.Schema({
   symbol: { type: String, required: true },
   direction: { type: String, enum: ['long', 'short'], required: true },
   market: { type: String, default: 'spot' },
+
+  // أسعار
   entryPrice: { type: Number, required: true },
   targetPrice: { type: Number, required: true },
   stopLoss: { type: Number, required: true },
-  currentStopLoss: Number,
-  highestPrice: Number,
+  currentStopLoss: { type: Number },
+  highestPrice: { type: Number },
   exitPrice: Number,
+
+  // حجم
   sizePercent: { type: Number, required: true },
   sizeUSDT: { type: Number, required: true },
   quantity: { type: Number, required: true },
+
+  // الأوامر المعلقة
   pendingOrders: [{
     orderId: String,
     type: { type: String, enum: ['entry', 'tp', 'sl'] },
-    price: Number, percent: Number,
+    price: Number,
+    percent: Number,
     status: { type: String, enum: ['pending', 'executed', 'cancelled', 'expired'], default: 'pending' },
     createdAt: { type: Date, default: Date.now },
-    executedAt: Date, expiredAt: Date, expiryHours: Number
+    executedAt: Date,
+    expiredAt: Date,
+    expiryHours: Number
   }],
+
+  // للصفقات الشهرية
   partialEntries: [{
-    percent: Number, price: Number,
+    percent: Number,
+    price: Number,
     executed: { type: Boolean, default: false },
     executedAt: Date,
     expiryHours: { type: Number, default: 48 },
     expired: { type: Boolean, default: false }
   }],
   partialExits: [{
-    percent: Number, price: Number,
+    percent: Number,
+    price: Number,
     executed: { type: Boolean, default: false },
     executedAt: Date
   }],
+
+  // نتائج
   status: { type: String, enum: ['pending_entry', 'open', 'closed', 'cancelled'], default: 'pending_entry' },
   closeReason: { type: String, enum: ['target', 'stop_loss', 'trailing_stop', 'timeout', 'manual', 'entry_expired', 'capital_protection'] },
-  pnl: Number, pnlPercent: Number,
+  pnl: Number,
+  pnlPercent: Number,
+
+  // تحليل AI
   confidence: { type: Number, required: true },
-  analysisSnapshot: String, backtestSummary: String,
-  onChainSnapshot: String, mtfAlignment: Number,
+  analysisSnapshot: String,
+  backtestSummary: String,
+  onChainSnapshot: String,
+  mtfAlignment: Number,
+
+  // تواريخ
   openedAt: { type: Date, default: Date.now },
-  entryDeadline: Date, closedAt: Date, expiresAt: Date,
+  entryDeadline: Date,
+  closedAt: Date,
+  expiresAt: Date,
+
+  // التعلم
   lessonLearned: String,
   rating: { type: Number, min: 1, max: 5 }
 }, { timestamps: true });
 
+// ==================== ALERT SCHEMA ====================
 const AlertSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   symbol: { type: String, required: true },
@@ -107,6 +146,7 @@ const AlertSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// ==================== LESSON SCHEMA ====================
 const LessonSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   tradeId: String,
@@ -118,26 +158,36 @@ const LessonSchema = new mongoose.Schema({
   appliedAt: { type: Date, default: Date.now }
 });
 
+// ==================== FEEDBACK SCHEMA ====================
 const FeedbackSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   type: { type: String, enum: ['trade_feedback', 'free_chat'], required: true },
   trade: {
-    symbol: String, direction: String,
-    entryPrice: Number, exitPrice: Number,
-    targetHit: Boolean, fahdRecommendation: String,
-    userAction: String, outcome: String, pnlPercent: Number
+    symbol: String,
+    direction: String,
+    entryPrice: Number,
+    exitPrice: Number,
+    targetHit: Boolean,
+    fahdRecommendation: String,
+    userAction: String,
+    outcome: String,
+    pnlPercent: Number
   },
   userNote: { type: String, required: true },
-  fahdResponse: String, fahdLesson: String, fahdAdjustment: String,
+  fahdResponse: String,
+  fahdLesson: String,
+  fahdAdjustment: String,
   createdAt: { type: Date, default: Date.now }
 });
 
+// ==================== MARKET CACHE ====================
 const MarketCacheSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true },
   data: mongoose.Schema.Types.Mixed,
   expiresAt: { type: Date, required: true, index: { expireAfterSeconds: 0 } }
 });
 
+// ==================== MODELS ====================
 const User = mongoose.model('User', UserSchema);
 const Trade = mongoose.model('Trade', TradeSchema);
 const Alert = mongoose.model('Alert', AlertSchema);
@@ -145,6 +195,7 @@ const Lesson = mongoose.model('Lesson', LessonSchema);
 const Feedback = mongoose.model('Feedback', FeedbackSchema);
 const MarketCache = mongoose.model('MarketCache', MarketCacheSchema);
 
+// ==================== CONNECTION ====================
 async function connectDB() {
   try {
     await mongoose.connect(process.env.MONGODB_URI, {

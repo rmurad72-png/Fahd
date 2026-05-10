@@ -589,8 +589,13 @@ async function analyzeOpportunity(coin, type, onChain) {
       name: coin.name,
       rank: coin.rank,
       price: coin.price,
+      change24h: coin.change24h,
+      change7d: coin.change7d,
+      volume24h: coin.volume24h,
+      marketCap: coin.marketCap,
       direction,
       confidence,
+      scanConfidence: confidence, // للتوافق مع التحليل العميق
       target,
       stopLoss,
       riskReward: Math.abs(target - coin.price) / Math.max(Math.abs(coin.price - stopLoss), 0.0001),
