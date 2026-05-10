@@ -44,7 +44,15 @@ const GECKO_IDS = {
   'SNX':'havven','COMP':'compound-governance-token','ENS':'ethereum-name-service',
   'ONDO':'ondo-finance','ZEC':'zcash','WLFI':'world-liberty-financial',
   'RENDER':'render-token','WIF':'dogwifcoin','PEPE':'pepe','BONK':'bonk',
-  'SEI':'sei-network','JUP':'jupiter-exchange-solana','STRK':'starknet'
+  'SEI':'sei-network','JUP':'jupiter-exchange-solana','STRK':'starknet',
+  'JASMY':'jasmycoin','GALA':'gala','IMX':'immutable-x','BLUR':'blur',
+  'CFX':'conflux-token','KAVA':'kava','ROSE':'oasis-network','ZIL':'zilliqa',
+  'ONE':'harmony','CHZ':'chiliz','HOT':'holotoken','BAT':'basic-attention-token',
+  'AUDIO':'audius','ENJ':'enjincoin','CELR':'celer-network','OCEAN':'ocean-protocol',
+  'ANKR':'ankr','CKB':'nervos-network','WLD':'worldcoin-wld',
+  'TIA':'celestia','PYTH':'pyth-network','JTO':'jito-governance-token',
+  'NOT':'notcoin','USUAL':'usual','LAYER':'solayer','OM':'mantra-dao',
+  'TRUMP':'official-trump','IP':'story-protocol'
 };
 
 // ==================== CACHE ====================
@@ -170,8 +178,8 @@ async function getKlines(symbol, timeframe) {
 }
 
 // ==================== HISTORICAL DATA (3 سنوات للـ Backtest) ====================
-// يستخدم /market_chart endpoint الذي يعطي بيانات يومية حتى 1095 يوم (3 سنوات)
-async function getHistoricalDaily(symbol, days = 1095) {
+// مع retry ذكي لتجاوز Rate Limiting من CoinGecko (429)
+async function getHistoricalDaily(symbol, days = 1095, retries = 3) {
   const cacheKey = `hist_${symbol}_${days}d`;
   const cached = await getCached(cacheKey);
   if (cached) return cached;
@@ -179,42 +187,63 @@ async function getHistoricalDaily(symbol, days = 1095) {
   const base = symbol.replace('/USDT', '').toUpperCase();
   const geckoId = GECKO_IDS[base] || base.toLowerCase();
 
-  try {
-    const resp = await axios.get(
-      `https://api.coingecko.com/api/v3/coins/${geckoId}/market_chart`,
-      { params: { vs_currency: 'usd', days, interval: 'daily' }, timeout: 20000 }
-    );
-    if (!resp.data?.prices?.length) return [];
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // تأخير تدريجي بين المحاولات لتجنب Rate Limiting
+      if (attempt > 1) {
+        const delay = attempt * 3000; // 3s, 6s
+        logger.debug(`🐆 Historical retry ${attempt} لـ ${symbol} بعد ${delay}ms`);
+        await sleep(delay);
+      }
 
-    const prices = resp.data.prices;
-    const volumes = resp.data.total_volumes || [];
+      const resp = await axios.get(
+        `https://api.coingecko.com/api/v3/coins/${geckoId}/market_chart`,
+        { params: { vs_currency: 'usd', days, interval: 'daily' }, timeout: 25000 }
+      );
+      if (!resp.data?.prices?.length) return [];
 
-    // بناء OHLC يومي من بيانات السعر
-    // CoinGecko يعطي نقطة سعر كل يوم — نبني OHLC تقريبي
-    const klines = prices.map((p, i) => {
-      const close = p[1];
-      const prevClose = i > 0 ? prices[i-1][1] : close;
-      const high = Math.max(close, prevClose) * (1 + Math.random() * 0.02);
-      const low = Math.min(close, prevClose) * (1 - Math.random() * 0.02);
-      return {
-        time: p[0],
-        open: prevClose,
-        high,
-        low,
-        close,
-        volume: volumes[i]?.[1] || 0
-      };
-    });
+      const prices = resp.data.prices;
+      const volumes = resp.data.total_volumes || [];
 
-    // Cache لـ 24 ساعة (بيانات تاريخية لا تتغير كثيراً)
-    await setCache(cacheKey, klines, 24 * 3600);
-    logger.debug(`🐆 Historical: ${symbol} ${klines.length} يوم (${Math.round(klines.length/365)} سنة)`);
-    return klines;
-  } catch (error) {
-    logger.debug(`🐆 Historical فشل ${symbol}: ${error.message}`);
-    // fallback للـ OHLC العادي
-    return getKlines(symbol, '1d');
+      const klines = prices.map((p, i) => {
+        const close = p[1];
+        const prevClose = i > 0 ? prices[i-1][1] : close;
+        const high = Math.max(close, prevClose) * (1 + Math.random() * 0.015);
+        const low = Math.min(close, prevClose) * (1 - Math.random() * 0.015);
+        return { time: p[0], open: prevClose, high, low, close, volume: volumes[i]?.[1] || 0 };
+      });
+
+      // Cache لـ 24 ساعة
+      await setCache(cacheKey, klines, 24 * 3600);
+      logger.debug(`🐆 Historical: ${symbol} ${klines.length} يوم (${(klines.length/365).toFixed(1)} سنة)`);
+      return klines;
+
+    } catch (error) {
+      const is429 = error.response?.status === 429 || error.message?.includes('429');
+      if (is429 && attempt < retries) {
+        logger.warn(`🐆 Rate Limit CoinGecko لـ ${symbol} — محاولة ${attempt}/${retries}`);
+        await sleep(attempt * 5000); // 5s, 10s بين محاولات 429
+        continue;
+      }
+      logger.debug(`🐆 Historical فشل ${symbol}: ${error.message}`);
+      // fallback للـ OHLC العادي (365 يوم)
+      return getKlines(symbol, '1d');
+    }
   }
+  return getKlines(symbol, '1d');
+}
+
+// جلب تاريخي بأولوية Cache — يُستخدم للـ Backtest بدون ضغط على API
+async function getHistoricalCached(symbol, days = 1095) {
+  const cacheKey = `hist_${symbol}_${days}d`;
+  const cached = await getCached(cacheKey);
+  if (cached) {
+    logger.debug(`🐆 Backtest Cache hit: ${symbol}`);
+    return cached;
+  }
+  // إذا لم يكن مخزناً، اجلب مع تأخير للحفاظ على Rate Limit
+  await sleep(1000); // ثانية واحدة بين الطلبات
+  return getHistoricalDaily(symbol, days);
 }
 
 // ==================== MTF INDICATORS ====================
@@ -409,7 +438,7 @@ async function runBacktest(symbol, signalType, confidence) {
 
   try {
     // جلب 3 سنوات من البيانات التاريخية
-    const klines = await getHistoricalDaily(symbol, 1095);
+    const klines = await getHistoricalCached(symbol, 1095);
 
     if (klines.length < 60) {
       logger.warn(`🐆 Backtest: بيانات غير كافية لـ ${symbol} (${klines.length} يوم)`);
@@ -577,8 +606,9 @@ async function getMarketPatternWinRate(signalType) {
   const cached = await getCached(cacheKey);
   if (cached) return cached;
 
-  const btcKlines = await getHistoricalDaily('BTC/USDT', 730).catch(() => []);
-  const ethKlines = await getHistoricalDaily('ETH/USDT', 730).catch(() => []);
+  const btcKlines = await getHistoricalCached('BTC/USDT', 730).catch(() => []);
+  await sleep(1500); // تجنب Rate Limiting
+  const ethKlines = await getHistoricalCached('ETH/USDT', 730).catch(() => []);
   let totalWins = 0, totalTrades = 0;
 
   for (const klines of [btcKlines, ethKlines]) {
@@ -814,12 +844,12 @@ async function scanMarket(type = 'daily') {
   logger.info(`🐆 الفهد: مسح السوق (${type}) — ${coins.length} عملة Spot`);
 
   const opportunities = [];
-  const batchSize = 8;
+  const batchSize = 5; // تقليل لتجنب Rate Limiting من CoinGecko
   for (let i = 0; i < coins.length; i += batchSize) {
     const batch = coins.slice(i, i + batchSize);
     const results = await Promise.allSettled(batch.map(coin => analyzeOpportunity(coin, type, onChain)));
     results.forEach(r => { if (r.status === 'fulfilled' && r.value) opportunities.push(r.value); });
-    if (i + batchSize < coins.length) await sleep(400);
+    if (i + batchSize < coins.length) await sleep(600); // تأخير أكبر بين الـ batches
   }
 
   opportunities.sort((a, b) => b.confidence - a.confidence);
@@ -880,7 +910,7 @@ function getDefaultCoins() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 module.exports = {
-  getTopCoins, getVerifiedPrice, getKlines, getHistoricalDaily,
+  getTopCoins, getVerifiedPrice, getKlines, getHistoricalDaily, getHistoricalCached,
   getMTFAnalysis, runBacktest, calculateConfidence,
   getFearGreedIndex, getFundingRate, getBTCDominance,
   getBTCOnChainMetrics, getMempoolData,

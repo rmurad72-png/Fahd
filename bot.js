@@ -6,7 +6,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const { connectDB, User, Trade, Alert } = require('./database');
 const { securityMiddleware, isAdmin, banUser, unbanUser } = require('./security');
 const { scanMarket, getVerifiedPrice, getTopCoins, getMTFAnalysis, runBacktest, getHistoricalDaily, getFullOnChainData, getPerformanceBenchmarks } = require('./market');
-const { deepAnalysis, analyzeChart } = require('./agent');
+const { deepAnalysis, analyzeChart, analyzeSmartMoney, generateAIForecast, generateTradingPlan, analyzeMacroCorrelation, generateQuantAnalysis } = require('./agent');
 const { openTrade, closeTrade, getPortfolioSnapshot, getPerformanceStats, addFunds } = require('./portfolio');
 const { runDailyAutoTrade, runMonthlyAutoTrade, executeTradesFromScan, setBot } = require('./autotrader');
 const { initScheduler } = require('./scheduler');
@@ -127,14 +127,23 @@ bot.onText(/\/analyze(?:\s+(\S+))?|تحليل عميق/, async (msg, match) => {
     };
     const analysis = await deepAnalysis(symbol, marketData, 'daily');
     await bot.deleteMessage(msg.chat.id, loadMsg.message_id);
-    await bot.sendMessage(msg.chat.id, formatAnalysis(analysis, symbol), {
-      reply_markup: analysis.recommendation === 'long' || analysis.recommendation === 'short' ? {
-        inline_keyboard: [[{
+    const analyzeKeyboard = {
+      inline_keyboard: [
+        ...(analysis.recommendation === 'long' || analysis.recommendation === 'short' ? [[{
           text: `تنفيذ ${analysis.recommendation === 'long' ? 'شراء' : 'بيع'} ${symbol}`,
           callback_data: `open_${symbol}_${analysis.recommendation}_${analysis.confidence}`
-        }]]
-      } : undefined
-    });
+        }]] : []),
+        [
+          { text: `📊 Quant ${symbol}`, callback_data: `quant_${symbol}` },
+          { text: `🔮 Forecast ${symbol}`, callback_data: `forecast_${symbol}` }
+        ],
+        [
+          { text: `💹 Smart Money ${symbol}`, callback_data: `smartmoney_${symbol}` },
+          { text: `🌍 تحليل كلي`, callback_data: 'macro_analysis' }
+        ]
+      ]
+    };
+    await bot.sendMessage(msg.chat.id, formatAnalysis(analysis, symbol), { reply_markup: analyzeKeyboard });
   });
 });
 
@@ -515,6 +524,58 @@ bot.on('callback_query', async (query) => {
       await bot.sendMessage(userId, 'مثال: /funds 5000');
     }
 
+    // Quant Analysis callback
+    if (data.startsWith('quant_')) {
+      const sym = data.replace('quant_', '');
+      const loadMsg = await bot.sendMessage(userId, `الفهد يجري تحليل كمي لـ ${sym}...`);
+      try {
+        const [bt, mtf] = await Promise.allSettled([
+          runBacktest(sym + '/USDT', 'long', 70),
+          getMTFAnalysis(sym + '/USDT', 'daily')
+        ]);
+        const analysis = await generateQuantAnalysis(sym, bt.value, mtf.value);
+        await bot.deleteMessage(userId, loadMsg.message_id).catch(() => {});
+        await bot.sendMessage(userId, `🐆 الفهد — Quant\n━━━━━━━━━━━━━━━━━━━━\n📊 ${sym}\n\n${safe(analysis, 1500)}\n\n⚠️ ليس نصيحة مالية`);
+      } catch(e) { await bot.editMessageText('فشل التحليل', {chat_id: userId, message_id: loadMsg.message_id}).catch(()=>{}); }
+    }
+
+    // Forecast callback
+    if (data.startsWith('forecast_')) {
+      const sym = data.replace('forecast_', '');
+      const loadMsg = await bot.sendMessage(userId, `الفهد يبني نموذج التوقع لـ ${sym}...`);
+      try {
+        const [coins, bt, mtf] = await Promise.allSettled([getTopCoins(), runBacktest(sym+'/USDT','long',70), getMTFAnalysis(sym+'/USDT','daily')]);
+        const coinData = (coins.value||[]).find(c=>c.symbol===sym) || {symbol:sym};
+        const forecast = await generateAIForecast(sym, {...coinData, mtf: mtf.value||{}}, bt.value);
+        await bot.deleteMessage(userId, loadMsg.message_id).catch(() => {});
+        await bot.sendMessage(userId, `🐆 الفهد — AI Forecast\n━━━━━━━━━━━━━━━━━━━━\n🪙 ${sym}\n\n${safe(forecast, 1200)}\n\n⚠️ نموذج احتمالي`);
+      } catch(e) { await bot.editMessageText('فشل التوقع', {chat_id: userId, message_id: loadMsg.message_id}).catch(()=>{}); }
+    }
+
+    // Smart Money callback
+    if (data.startsWith('smartmoney_')) {
+      const sym = data.replace('smartmoney_', '');
+      const loadMsg = await bot.sendMessage(userId, `الفهد يحلل Smart Money لـ ${sym}...`);
+      try {
+        const [coins, mtf, onChain] = await Promise.allSettled([getTopCoins(), getMTFAnalysis(sym+'/USDT','daily'), getFullOnChainData(sym)]);
+        const coinData = (coins.value||[]).find(c=>c.symbol===sym) || {symbol:sym};
+        const analysis = await analyzeSmartMoney(sym, {...coinData, mtf: mtf.value||{}, onChain: onChain.value||{}});
+        await bot.deleteMessage(userId, loadMsg.message_id).catch(() => {});
+        await bot.sendMessage(userId, `🐆 الفهد — Smart Money\n━━━━━━━━━━━━━━━━━━━━\n🪙 ${sym}\n\n${safe(analysis, 1200)}\n\n⚠️ ليس نصيحة مالية`);
+      } catch(e) { await bot.editMessageText('فشل التحليل', {chat_id: userId, message_id: loadMsg.message_id}).catch(()=>{}); }
+    }
+
+    // Macro callback
+    if (data === 'macro_analysis') {
+      const loadMsg = await bot.sendMessage(userId, 'الفهد يحلل العوامل الكلية...');
+      try {
+        const onChain = await getFullOnChainData('BTC').catch(() => null);
+        const analysis = await analyzeMacroCorrelation(onChain);
+        await bot.deleteMessage(userId, loadMsg.message_id).catch(() => {});
+        await bot.sendMessage(userId, `🐆 الفهد — تحليل كلي\n━━━━━━━━━━━━━━━━━━━━\n🏦 BTC + الفيدرالي + M2\n\n${safe(analysis, 1500)}\n\n⚠️ ليس نصيحة مالية`);
+      } catch(e) { await bot.editMessageText('فشل التحليل', {chat_id: userId, message_id: loadMsg.message_id}).catch(()=>{}); }
+    }
+
     // تقييم الصفقة ⭐
     if (data.startsWith('rate_')) {
       const parts = data.split('_');
@@ -575,6 +636,80 @@ process.on('unhandledRejection', err => logger.error('Rejection:', err));
 process.on('uncaughtException', err => logger.error('Exception:', err.message));
 
 start().catch(err => { logger.error('فشل التشغيل:', err); process.exit(1); });
+
+// ==================== ADVANCED ANALYSIS COMMANDS ====================
+
+// /smartmoney - تحليل Smart Money
+bot.onText(/\/smartmoney(?:\s+(\S+))?/, async (msg, match) => {
+  await handle(msg, async () => {
+    const symbol = match?.[1]?.toUpperCase();
+    if (!symbol) { await bot.sendMessage(msg.chat.id, 'مثال: /smartmoney BTC'); return; }
+    const loadMsg = await bot.sendMessage(msg.chat.id, `الفهد يحلل Smart Money لـ ${symbol}...`);
+    const [coins, mtf, onChain] = await Promise.allSettled([
+      getTopCoins(), getMTFAnalysis(symbol + '/USDT', 'daily'), getFullOnChainData(symbol)
+    ]);
+    const allCoins = coins.status === 'fulfilled' ? coins.value : [];
+    const coinData = allCoins.find(c => c.symbol === symbol) || { symbol };
+    const marketData = {
+      ...coinData,
+      mtf: mtf.status === 'fulfilled' ? mtf.value : {},
+      onChain: onChain.status === 'fulfilled' ? onChain.value : {}
+    };
+    const analysis = await analyzeSmartMoney(symbol, marketData);
+    await bot.deleteMessage(msg.chat.id, loadMsg.message_id).catch(() => {});
+    await bot.sendMessage(msg.chat.id, `🐆 الفهد — Smart Money Concepts\n━━━━━━━━━━━━━━━━━━━━\n🪙 ${symbol}\n\n${safe(analysis, 1200)}\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ تحليل الفهد — ليس نصيحة مالية`);
+  });
+});
+
+// /forecast - توقع AI
+bot.onText(/\/forecast(?:\s+(\S+))?/, async (msg, match) => {
+  await handle(msg, async () => {
+    const symbol = match?.[1]?.toUpperCase();
+    if (!symbol) { await bot.sendMessage(msg.chat.id, 'مثال: /forecast BTC'); return; }
+    const loadMsg = await bot.sendMessage(msg.chat.id, `الفهد يبني نموذج التوقع لـ ${symbol}...`);
+    const [coins, backtest, mtf] = await Promise.allSettled([
+      getTopCoins(),
+      runBacktest(symbol + '/USDT', 'long', 70),
+      getMTFAnalysis(symbol + '/USDT', 'daily')
+    ]);
+    const allCoins = coins.status === 'fulfilled' ? coins.value : [];
+    const coinData = allCoins.find(c => c.symbol === symbol) || { symbol };
+    const marketData = { ...coinData, mtf: mtf.status === 'fulfilled' ? mtf.value : {} };
+    const backtestData = backtest.status === 'fulfilled' ? backtest.value : null;
+    const forecast = await generateAIForecast(symbol, marketData, backtestData);
+    await bot.deleteMessage(msg.chat.id, loadMsg.message_id).catch(() => {});
+    await bot.sendMessage(msg.chat.id, `🐆 الفهد — AI Forecast\n━━━━━━━━━━━━━━━━━━━━\n🪙 ${symbol}\n\n${safe(forecast, 1200)}\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ نموذج احتمالي — ليس ضماناً`);
+  });
+});
+
+// /macro - تحليل كلي BTC + فيدرالي
+bot.onText(/\/macro/, async (msg) => {
+  await handle(msg, async () => {
+    const loadMsg = await bot.sendMessage(msg.chat.id, 'الفهد يحلل العوامل الكلية...');
+    const onChain = await getFullOnChainData('BTC').catch(() => null);
+    const analysis = await analyzeMacroCorrelation(onChain);
+    await bot.deleteMessage(msg.chat.id, loadMsg.message_id).catch(() => {});
+    await bot.sendMessage(msg.chat.id, `🐆 الفهد — تحليل كلي\n━━━━━━━━━━━━━━━━━━━━\n🏦 BTC + الفيدرالي + السيولة العالمية\n\n${safe(analysis, 1500)}\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ تحليل الفهد — ليس نصيحة مالية`);
+  });
+});
+
+// /quant - تحليل كمي
+bot.onText(/\/quant(?:\s+(\S+))?/, async (msg, match) => {
+  await handle(msg, async () => {
+    const symbol = match?.[1]?.toUpperCase();
+    if (!symbol) { await bot.sendMessage(msg.chat.id, 'مثال: /quant BTC'); return; }
+    const loadMsg = await bot.sendMessage(msg.chat.id, `الفهد يجري تحليل كمي لـ ${symbol}...`);
+    const [backtest, mtf] = await Promise.allSettled([
+      runBacktest(symbol + '/USDT', 'long', 70),
+      getMTFAnalysis(symbol + '/USDT', 'daily')
+    ]);
+    const bt = backtest.status === 'fulfilled' ? backtest.value : null;
+    const mtfData = mtf.status === 'fulfilled' ? mtf.value : {};
+    const analysis = await generateQuantAnalysis(symbol, bt, mtfData);
+    await bot.deleteMessage(msg.chat.id, loadMsg.message_id).catch(() => {});
+    await bot.sendMessage(msg.chat.id, `🐆 الفهد — Quant Analysis\n━━━━━━━━━━━━━━━━━━━━\n📊 ${symbol}\n\n${safe(analysis, 1500)}\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ تحليل الفهد — ليس نصيحة مالية`);
+  });
+});
 
 // ==================== ADMIN PANEL ====================
 // /admin_panel - لوحة التحكم الرئيسية

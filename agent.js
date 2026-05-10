@@ -311,8 +311,153 @@ JSON فقط:
   return parseJSON(resp) || { acknowledgment: resp, lesson: '', strategyAdjustment: '' };
 }
 
+// ==================== SMART MONEY CONCEPTS ====================
+async function analyzeSmartMoney(symbol, marketData) {
+  const system = `أنت "الفهد 🐆" — محلل Smart Money متخصص. تحلل سلوك الأموال الكبيرة والمؤسسات. اكتب بالعربية مباشرة دون JSON.`;
+  const p = parseFloat(marketData.price) || 0;
+  const mtf = marketData.mtf || {};
+  const onChain = marketData.onChain || {};
+
+  const prompt = `حلل Smart Money Concepts لـ ${symbol}:
+
+السعر: $${p.toFixed(p < 1 ? 6 : 4)}
+MTF: ${mtf.dominantTrend || 'محايد'} | تناسق: ${mtf.alignment ? (mtf.alignment*100).toFixed(0)+'%' : 'N/A'}
+الخوف والطمع: ${onChain.fearGreed?.value || 'N/A'}/100
+هيمنة BTC: ${onChain.btcDominance?.btcDominance || 'N/A'}%
+
+قدّم تحليلاً مختصراً يشمل:
+1. مناطق السيولة والـ Liquidity Pools المحتملة
+2. Order Blocks صاعدة وهابطة
+3. Fair Value Gaps إن وُجدت
+4. توقع حركة الأموال المؤسسية
+5. خلاصة: هل الأموال الكبيرة تتجمع أم تتوزع؟`;
+
+  return await callClaude(HAIKU, system, prompt);
+}
+
+// ==================== AI FORECAST ====================
+async function generateAIForecast(symbol, marketData, backtest) {
+  const system = `أنت "الفهد 🐆" — نموذج توقع ذكاء اصطناعي للأسواق المالية. اكتب بالعربية مباشرة.`;
+  const p = parseFloat(marketData.price) || 0;
+
+  const prompt = `بناءً على البيانات التالية لـ ${symbol}، قدّم توقعاً احتمالياً:
+
+السعر الحالي: $${p.toFixed(p < 1 ? 6 : 4)}
+التغير 24س: ${parseFloat(marketData.change24h || 0).toFixed(2)}%
+التغير 7 أيام: ${parseFloat(marketData.change7d || 0).toFixed(2)}%
+التغير 30 يوم: ${parseFloat(marketData.change30d || 0).toFixed(2)}%
+Backtest معدل الفوز: ${backtest?.winRate || 'N/A'}%
+الاتجاه السائد: ${marketData.mtf?.dominantTrend || 'محايد'}
+
+قدّم:
+**توقع الأسبوع القادم:**
+- السيناريو المتفائل (احتمال %): هدف $...
+- السيناريو المحايد (احتمال %): نطاق $...-$...
+- السيناريو المتشائم (احتمال %): مستوى دعم $...
+
+**توقع الشهر القادم:**
+- الاتجاه المتوقع + مستويات رئيسية
+- أهم عوامل الخطر
+
+**ملاحظة:** هذا نموذج احتمالي وليس ضماناً.`;
+
+  return await callClaude(HAIKU, system, prompt);
+}
+
+// ==================== FULL TRADING PLAN ====================
+async function generateTradingPlan(symbol, analysis, portfolioSize = 10000) {
+  const system = `أنت "الفهد 🐆" — مخطط صفقات محترف بمستوى صناديق التحوط. اكتب بالعربية.`;
+
+  const riskPercent = 2; // 2% من المحفظة
+  const riskAmount = portfolioSize * riskPercent / 100;
+
+  const prompt = `ضع خطة تداول احترافية كاملة لـ ${symbol}:
+
+التوصية: ${analysis.recommendation}
+الثقة: ${analysis.confidence}%
+دخول: $${analysis.entry || 'N/A'}
+هدف: $${analysis.target || 'N/A'}
+وقف: $${analysis.stopLoss || 'N/A'}
+R/R: ${analysis.riskReward || 'N/A'}:1
+حجم المحفظة: $${portfolioSize.toFixed(0)}
+نسبة المخاطرة: ${riskPercent}% = $${riskAmount.toFixed(0)}
+
+قدّم خطة كاملة تشمل:
+**Position Sizing:**
+- حجم الصفقة بالدولار
+- حجم الصفقة بالوحدات
+- نسبة المحفظة المستخدمة
+
+**إدارة المخاطر:**
+- وقف الخسارة الأولي
+- Trailing Stop بعد +5%
+- نقطة التعادل (Move to Breakeven)
+
+**خطة الخروج:**
+- الهدف الأول (50% من المركز)
+- الهدف الثاني (30% من المركز)
+- الهدف الثالث (20% من المركز)
+
+**شروط الإلغاء:**
+- متى لا تدخل الصفقة؟`;
+
+  return await callClaude(HAIKU, system, prompt);
+}
+
+// ==================== BTC MACRO CORRELATION ====================
+async function analyzeMacroCorrelation(onChainData) {
+  const system = `أنت "الفهد 🐆" — محلل اقتصادي كلي متخصص في ارتباط أسواق الكريبتو بالسياسة النقدية. اكتب بالعربية.`;
+
+  const fg = onChainData?.fearGreed;
+  const dom = onChainData?.btcDominance;
+
+  const prompt = `حلل ارتباط البيتكوين بالعوامل الكلية الحالية:
+
+مؤشر الخوف والطمع: ${fg?.value || 'N/A'}/100 — ${fg?.classificationAr || ''}
+هيمنة BTC: ${dom?.btcDominance || 'N/A'}%
+إجمالي السوق: $${dom?.totalMarketCap ? (dom.totalMarketCap/1e12).toFixed(2)+'T' : 'N/A'}
+عناوين BTC النشطة: ${onChainData?.btcOnChain?.activeAddresses?.toLocaleString() || 'N/A'}
+ضغط الشبكة: ${onChainData?.mempool?.signal || 'N/A'}
+
+قدّم تحليلاً لـ:
+1. ارتباط BTC بالسيولة العالمية M2 حالياً
+2. توقع تأثير سياسة الفيدرالي (رفع/تثبيت/خفض الفائدة) على BTC
+3. مؤشرات السيولة المؤسسية — هل الأموال تدخل أم تخرج؟
+4. المرحلة الحالية من دورة السوق (تراكم/ارتفاع/توزيع/هبوط)
+5. توصية الموقف الاستراتيجي بناءً على العوامل الكلية`;
+
+  return await callClaude(HAIKU, system, prompt);
+}
+
+// ==================== QUANT ANALYSIS ====================
+async function generateQuantAnalysis(symbol, backtest, mtf) {
+  const system = `أنت "الفهد 🐆" — محلل كمي متخصص. قدّم إحصائيات متقدمة. اكتب بالعربية.`;
+
+  const prompt = `قدّم تحليلاً كمياً متقدماً لـ ${symbol}:
+
+Backtest (${backtest?.dataYears?.toFixed(1) || '?'} سنة):
+- إشارات: ${backtest?.occurrences || 0} | فوز: ${backtest?.winRate || 0}%
+- متوسط عائد: ${backtest?.avgReturn || 0}% | أسوأ خسارة: ${backtest?.worstCase || 0}%
+- آخر 3 أشهر: ${backtest?.recentWinRate || 0}% | أقصى خسائر متتالية: ${backtest?.maxConsecLosses || 0}
+- مقارنة بالسوق: ${backtest?.marketWinRate || 0}%
+
+MTF: ${mtf?.dominantTrend || 'محايد'} | تناسق: ${mtf?.alignment ? (mtf.alignment*100).toFixed(0)+'%' : 'N/A'}
+
+احسب وقدّم:
+1. Expected Value لكل صفقة = (winRate × avgReturn) - (lossRate × avgLoss)
+2. تقييم Sharpe Ratio تقريبي
+3. Maximum Drawdown المتوقع
+4. احتمال الربح في الشهر القادم بناءً على Backtest
+5. مقارنة الأداء بـ BTC+ETH (Alpha)
+6. هل الإشارة ذات ميزة إحصائية حقيقية؟ (Edge)`;
+
+  return await callClaude(HAIKU, system, prompt);
+}
+
 module.exports = {
   deepAnalysis, analyzeChart, analyzeLesson,
   generateMorningBriefing, quickScanSummary,
-  freeChatWithFahd, analyzeFeedback
+  freeChatWithFahd, analyzeFeedback,
+  analyzeSmartMoney, generateAIForecast,
+  generateTradingPlan, analyzeMacroCorrelation, generateQuantAnalysis
 };

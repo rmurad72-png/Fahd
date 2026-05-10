@@ -6,14 +6,24 @@
 const FAHD = '🐆 الفهد';
 const DIVIDER = '━━━━━━━━━━━━━━━━━━━━';
 
+// علامة RTL لضمان اتجاه صحيح دائماً
+const RTL = '\u200F';
+const LTR = '\u200E';
+
 function safe(text, maxLen = 500) {
   if (text === null || text === undefined) return 'N/A';
   if (typeof text === 'number') return text.toString();
   return String(text)
-    .replace(/[*_`\[\]()~>#+=|{}.!\\]/g, ' ')
+    // إزالة رموز markdown فقط — بدون النقطة حتى لا تُحذف من الأرقام
+    .replace(/[*_`\[\]()~>#+=|{}!\\]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .substring(0, maxLen);
+}
+
+// تنسيق الأرقام بـ LTR isolate لضمان عرضها صحيحاً في السياق العربي
+function numLTR(val) {
+  return `${LTR}${val}${RTL}`;
 }
 
 function fmtPrice(num, dec = 4) {
@@ -414,6 +424,11 @@ function formatHelp() {
   msg += `   /alert ETH 3000 — انشاء تنبيه\n`;
   msg += `   /alerts — قائمة التنبيهات\n`;
   msg += `   /delalert 1 — حذف تنبيه\n\n`;
+  msg += `🔬 تحليل متقدم:\n`;
+  msg += `   /smartmoney BTC — Smart Money Concepts\n`;
+  msg += `   /forecast BTC — AI Forecast أسبوعي وشهري\n`;
+  msg += `   /quant BTC — تحليل كمي إحصائي\n`;
+  msg += `   /macro — BTC + الفيدرالي + السيولة العالمية\n\n`;
   msg += `🧠 التعلم:\n`;
   msg += `   /feedback — تغذية راجعة منظمة\n`;
   msg += `   /chat — محادثة حرة مع الفهد\n`;
