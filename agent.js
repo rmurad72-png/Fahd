@@ -27,8 +27,8 @@ function cleanMarkdown(text) {
     .replace(/\*([^*]+)\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
     // إزالة Code blocks
-    .replace(/```[\s\S]*?```/g, function(m) {
-      return m.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim();
+    .replace(/[\s\S]*?/g, function(m) {
+      return m.replace(/[a-z]*\n?/gi, '').replace(//g, '').trim();
     })
     .replace(/`([^`]+)`/g, '$1')
     // إزالة فواصل Markdown
@@ -84,7 +84,7 @@ async function callClaude(model, system, userMsg, imageB64 = null) {
 function parseJSON(text) {
   if (!text) return null;
   try {
-    let clean = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+    let clean = text.replace(/json\n?/gi, '').replace(/?/g, '').trim();
     const s = clean.indexOf('{'), e = clean.lastIndexOf('}');
     if (s !== -1 && e > s) return JSON.parse(clean.substring(s, e + 1));
   } catch {}
@@ -217,7 +217,7 @@ ${tfDetails}
 🔗 On-Chain:
 - الخوف والطمع: ${fg ? fg.value + '/100 — ' + fg.classificationAr + ' (' + fg.signal + ')' : 'غير متوفر'}
 - Funding Rate: ${fr ? (fr.rate || 0).toFixed(4) + '% — ' + fr.signalAr : 'غير متوفر'}
-- هيمنة BTC: ${dom !== undefined && dom !== null ? (typeof dom === 'object' ? (dom.btcDominance || dom.value || '') : dom) + '%' : ''}
+- هيمنة BTC: ${dom !== undefined && dom !== null ? (typeof dom === 'object' ? (dom.btcDominance || dom.value || '') + '% — ' + (dom.signal || '') : dom + '%') : 'N/A'}
 - عناوين BTC النشطة: ${btcChain?.activeAddresses ? btcChain.activeAddresses.toLocaleString() + ' — ' + btcChain.signal : 'غير متوفر'}
 - Mempool: ${mempool ? mempool.signal : 'غير متوفر'}
 ${backtestSection}
@@ -332,14 +332,16 @@ ETH: $${benchmarks?.eth?.price?.toFixed(0) || 'N/A'} (${benchmarks?.eth?.change2
 // ==================== QUICK SCAN SUMMARY ====================
 async function quickScanSummary(opportunities, onChain) {
   if (!opportunities.length) return 'لا توجد فرص تلبي معايير الاستراتيجية حالياً في السوق الفوري.';
-  const system = `أنت "الفهد 🐆" — تقدم ملخصاً موجزاً لأفضل فرص السوق الفوري. اكتب بالعربية مباشرة دون JSON.`;
+  const system = `أنت "الفهد 🐆" — تقدم ملخصاً موجزاً لأفضل فرص السوق الفوري. اكتب بالعربية مباشرة دون JSON. ممنوع: ## ** \`\`\` --- ===`;
   const fg = onChain?.fearGreed;
-  const top3 = opportunities.slice(0, 3);
-  const prompt = `لخص أفضل فرص Spot في 4-5 أسطر:
+  const top5 = opportunities.slice(0, 5);
+  const topCount = top5.length;
+  const prompt = `لخص أفضل ${topCount} فرص Spot في 4-5 أسطر موجزة:
 ${fg ? 'الخوف والطمع: ' + fg.value + '/100 — ' + fg.classificationAr : ''}
-${top3.map((o, i) => `${i+1}. ${o.symbol} ${o.direction==='long'?'شراء':'بيع'} | $${o.price?.toFixed(4)} | ثقة: ${o.confidence}% | MTF: ${((o.mtfAlignment||0)*100).toFixed(0)}%`).join('\n')}
+${top5.map((o, i) => `${i+1}. ${o.symbol} ${o.direction==='long'?'شراء':'بيع'} | $${o.price?.toFixed(4)} | ثقة: ${o.confidence}% | MTF: ${((o.mtfAlignment||0)*100).toFixed(0)}% | R/R: ${(o.riskReward||0).toFixed(1)}:1`).join('\n')}
 
-اذكر: أبرز فرصة، السياق العام، تحذير مخاطر.`;
+اذكر: أبرز فرصة وسببها، السياق العام للسوق، تذكير بضرورة وقف الخسارة حسب إعدادات الفهد (${top5[0]?.stopLoss ? '3%' : 'محدد في الصفقة'}).
+لا تذكر نسب مختلقة مثل "2-3%" أو "-5%" — الفهد يحدد الوقف تلقائياً.`;
   return await callClaude(HAIKU, system, prompt);
 }
 
@@ -392,7 +394,7 @@ JSON فقط:
 async function analyzeSmartMoney(symbol, marketData) {
   const system = 'أنت "الفهد 🐆" — محلل Smart Money Concepts متخصص. التاريخ: ' + getCurrentDate() + '.' +
     ' اكتب بالعربية فقط.' +
-    ' ممنوع منعاً باتاً: ## و** و``` و--- و=== والجداول والخطوط ━━━.' +
+    ' ممنوع منعاً باتاً: ## و** و و--- و=== والجداول والخطوط ━━━.' +
     ' استخدم الأرقام والإيموجي فقط للتنظيم.' +
     ' قسّم التحليل لأقسام قصيرة ≤ 400 حرف لكل قسم.';
   const p = parseFloat(marketData.price) || 0;
@@ -433,7 +435,7 @@ MTF: ${mtf.dominantTrend || 'محايد'} | تناسق: ${mtf.alignment ? (mtf.a
 
 // ==================== AI FORECAST ====================
 async function generateAIForecast(symbol, marketData, backtest, mtfData) {
-  const system = 'أنت "الفهد 🐆" — محلل توقعات. ' + getCurrentDate() + '. بالعربية. ممنوع: ## ** ``` --- === الجداول ━━━.';
+  const system = 'أنت "الفهد 🐆" — محلل توقعات. ' + getCurrentDate() + '. بالعربية. ممنوع: ## **  --- === الجداول ━━━.';
   const p = parseFloat(marketData.price) || 0;
   const today = getCurrentDate();
   // احتمالات ديناميكية بناءً على MTF
@@ -508,11 +510,11 @@ R/R: ${analysis?.riskReward || 'N/A'}:1
 حجم المحفظة: $${(portfolioSize || 0).toFixed(0)}
 المخاطرة: ${riskPercent}% = $${(riskAmount || 0).toFixed(0)}
 
-Position Sizing:
-- الحد الأقصى: 30-50% من المحفظة (ليس 100%)
+Position Sizing (حد أقصى 10% لكل مركز — قاعدة إدارة المخاطر):
+- الحجم الموصى: 5-10% من المحفظة لكل صفقة واحدة
 - Scaling in: 50% عند Trigger الأول + 50% عند تأكيد ثانوي
 - الوحدات الفعلية بسعر الدخول
-- نسبة المحفظة المستخدمة
+- نسبة المحفظة المستخدمة (5-10% فقط)
 
 إدارة المخاطر:
 - وقف الخسارة الأولي
@@ -531,7 +533,7 @@ Position Sizing:
 
 // ==================== MACRO CORRELATION ====================
 async function analyzeMacroCorrelation(onChainData, benchmarks) {
-  const system = 'أنت "الفهد 🐆" — محلل اقتصادي كلي. ' + getCurrentDate() + '. بالعربية. ممنوع: ## ** ``` --- === الجداول ━━━.';
+  const system = 'أنت "الفهد 🐆" — محلل اقتصادي كلي. ' + getCurrentDate() + '. بالعربية. ممنوع: ## **  --- === الجداول ━━━.';
   const fg = onChainData?.fearGreed;
   // جلب السعر الحالي من benchmarks
   const btcNow = benchmarks && (benchmarks.BTC || benchmarks.btc);
@@ -553,9 +555,9 @@ async function analyzeMacroCorrelation(onChainData, benchmarks) {
 - BTC ليس "ملاذ آمن" بل "أصل سيولة عالي الحساسية"
 - Fear & Greed منخفض (< 30) = تاريخياً أقرب للـ accumulation لا للتوزيع
 - الفيدرالي: ركّز على اتجاه Real Yield وليس مستوى الفائدة
-- M2: اعتمد على Lag Effect 8-12 أسبوع والتغير لا القيمة
+- M2: اعتمد على تأثير التأخر 8-12 أسبوع والتغير لا القيمة
 
-1. M2 العالمية والـ Lag Effect:
+1. M2 العالمية والـ تأثير التأخر:
    ما السيولة المُسعَّرة الآن؟ وما المتوقع خلال 8-12 أسبوع؟
 
 2. Decision Engine الشرطي:
@@ -568,8 +570,8 @@ async function analyzeMacroCorrelation(onChainData, benchmarks) {
    استخدم: ETH/BTC نسبة + حجم ETFs المتوقع
 
 4. المرحلة السوقية الحقيقية:
-   هل نحن في Distribution أم Re-Accumulation أم Range Expansion؟
-   (لا تقل Distribution إلا بدليل: blow-off top + On-chain توزيع)
+   هل نحن في توزيع أم إعادة التراكم أم توسع النطاق؟
+   (لا تقل توزيع إلا بدليل: قمة انفجارية + On-chain توزيع)
 
 5. ثلاثة سيناريوهات باحتمالات:
    Bearish X% / Sideways Y% / Bullish Z%
@@ -586,7 +588,7 @@ async function generateQuantAnalysis(symbol, backtest, mtf, zScoreData, currentP
   zScoreData = zScoreData || null;
   // السعر الحالي الحقيقي
   var priceNow = currentPrice || null;
-  const system = 'أنت "الفهد 🐆" — محلل كمي. ' + getCurrentDate() + '. بالعربية. موجز. ممنوع: ## ** ``` --- === الجداول ━━━.';
+  const system = 'أنت "الفهد 🐆" — محلل كمي. ' + getCurrentDate() + '. بالعربية. موجز. ممنوع: ## **  --- === الجداول ━━━.';
   const hasData = backtest && backtest.occurrences > 0;
   const zScore = zScoreData?.zScore || 0;
   const zSignal = zScoreData?.zInterpret?.signal || 'N/A';
@@ -634,7 +636,7 @@ ETH: $${benchmarks?.eth?.price?.toFixed(0) || 'N/A'} (${benchmarks?.eth?.change3
 ${oppsList}
 
 1. تقييم المرحلة الشهرية:
-   Trending/Range/Accumulation/Distribution؟
+   Trending/Range/Accumulation/توزيع؟
    الإطار الزمني الواقعي: 4-6 أسابيع للتعافي (في حالة accumulation)
 
 2. توزيع رأس المال القطاعي:

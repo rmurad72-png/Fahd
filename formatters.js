@@ -83,7 +83,11 @@ function formatScan(opportunities, totalScanned, summary, onChain) {
   if (fg || dom) {
     msg += `🔗 On-Chain:\n`;
     if (fg) msg += `   الخوف والطمع: ${fg.value}/100 — ${fg.classificationAr}\n`;
-    if (dom !== undefined && dom !== null) msg += `   هيمنة BTC: ${typeof dom === 'object' ? (dom.btcDominance || dom.value || 'N/A') : dom}% — ${typeof dom === 'object' ? safe(dom.signal) : ''}\n`;
+    if (dom !== undefined && dom !== null) {
+      const domVal = typeof dom === 'object' ? (dom.btcDominance || dom.value || 'N/A') : dom;
+      const domSignal = typeof dom === 'object' ? (dom.signal || '') : '';
+      msg += `   هيمنة BTC: ${domVal}% — ${domSignal}\n`;
+    }
     msg += '\n';
   }
 

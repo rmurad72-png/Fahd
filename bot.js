@@ -452,7 +452,7 @@ bot.onText(/\/history/, async (msg) => {
       txt += `${i + 1}. ${t.symbol} | ${icon}\n`;
       if (t.pnl !== undefined) txt += `   $${t.pnl?.toFixed(2)} (${t.pnlPercent?.toFixed(2)}%)\n`;
       if (t.closeReason) txt += `   السبب: ${t.closeReason}\n`;
-      if (t.lessonLearned) txt += `   الدرس: ${safe(t.lessonLearned, 100)}\n`;
+      if (t.lessonLearned) txt += `   الدرس: ${safe(t.lessonLearned, 200)}\n`;
       txt += '\n';
     });
     await bot.sendMessage(msg.chat.id, txt);
@@ -675,11 +675,11 @@ bot.on('callback_query', async (query) => {
       } else {
         const reason = result.reason || 'الفرص لا تستوفي معايير التحليل العميق';
         const oppsCount = freshScan.opportunities?.length || 0;
-        const strictNote = user.settings?.strictMode ? '\n⚠️ وضع التشديد نشط' : '';
+        const strictNote = user.settings?.strictMode ? '\n⚠️ وضع التشديد نشط — حد الثقة مرفوع تلقائياً' : '';
         const rejDetails = result.rejectionSummary ? '\n\n🔍 تفاصيل الرفض:\n' + result.rejectionSummary : '';
         const threshold = user.settings.confidenceThreshold || 65;
         await bot.sendMessage(userId,
-          `🐆 الفهد — لم تُنفَّذ صفقات${strictNote}\n\nالسبب: ${safe(reason)}${rejDetails}\n\nالفرص المتاحة: ${oppsCount}\nحد الثقة: ${threshold}%\n\n💡 جرب:\n• تخفيض حد الثقة من /strategy\n• تفعيل التداول الآلي من /autotrade\n• انتظر الجولة التلقائية القادمة (كل 4 ساعات)`
+          `🐆 الفهد — لم تُنفَّذ صفقات${strictNote}\n\nالسبب: ${safe(reason)}${rejDetails}\n\nالفرص المتاحة: ${oppsCount}\nحد الثقة: ${threshold}%\n\n💡 ${user.settings?.strictMode ? 'في وضع التشديد: انتظر إشارات أقوى (70%+) — الجولة التلقائية تراقب كل 4 ساعات' : 'جرب: مسح جديد بعد تحرك السوق أو انتظر الجولة التلقائية القادمة (كل 4 ساعات)'}`
         );
       }
     }

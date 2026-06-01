@@ -183,6 +183,9 @@ async function getTopCoins() {
         const price = c.quote && c.quote.USD && c.quote.USD.price || 0;
         if (vol < 100000) return false;
         if (price <= 0) return false;
+        // ✅ فلترة العملات ذات الأسماء/الرموز غير اللاتينية (صينية، عربية، إلخ)
+        if (!/^[A-Z0-9\-_.]+$/.test(c.symbol)) return false;
+        if (c.name && /[\u4e00-\u9fff\u0600-\u06ff\u0900-\u097f]/.test(c.name)) return false;
         return true;
       })
       .slice(0, 100)
@@ -880,12 +883,34 @@ async function scanMarket(type = 'daily') {
 async function analyzeOpportunity(coin, type, onChain) {
   try {
     const mtf = await getMTFAnalysis(coin.symbol + '/USDT', type);
-    const confidence = calculateConfidence(coin, mtf, onChain, type);
-    if (confidence < 40) return null;
+    // ✅ فلتر RSI التشبع الشرائي — يمنع التناقض بين المسح والتحليل العميق
+    // إذا كان RSI > 78 في الإطار اليومي أو الأسبوعي → رفض فوري
+    const d1RSI = mtf?.tfDetails?.find(t => t.tf === '1D')?.rsi || 50;
+    const h4RSI = mtf?.tfDetails?.find(t => t.tf === '4H')?.rsi || 50;
+    const maxRSI = Math.max(d1RSI, h4RSI);
+    if (maxRSI > 80) {
+      logger.debug(`🐆 رفض ${coin.symbol}: RSI ${maxRSI.toFixed(0)} تشبع شرائي`);
+      return null;
+    }
+    // تقليل الثقة عند RSI 70-80
+    const rsiPenalty = maxRSI > 75 ? 10 : maxRSI > 70 ? 5 : 0;
 
-    // Spot فقط = Long دائماً — لا Short في السوق الفوري
-  const direction = 'long';
-    const { target, stopLoss } = calculateLevels(coin.price, direction, type);
+    // ✅ فلتر البيانات الصفرية — يمنع ظهور عملات بلا سعر أو RSI=50 على كل الإطارات
+    const allRSI50 = (mtf?.tfDetails || []).length >= 2 &&
+      (mtf?.tfDetails || []).filter(t => t.rsi === 50).length >= (mtf?.tfDetails || []).length;
+    if (allRSI50 || coin.price <= 0) {
+      logger.debug(`🐆 رفض ${coin.symbol}: بيانات غير كافية (RSI=${d1RSI}, price=${coin.price})`);
+      return null;
+    }
+
+    const adjustedConfidence = Math.max(0, confidence - rsiPenalty);
+
+    // استخراج ATR ومستويات الدعم/المقاومة من MTF للحساب الديناميكي
+    const d1tf = mtf?.timeframes?.find(t => t.tf === '1D');
+    const atrVal = d1tf?.analysis?.atr || 0;
+    const supportVal = d1tf?.analysis?.support || 0;
+    const resistanceVal = d1tf?.analysis?.resistance || 0;
+    const { target, stopLoss } = calculateLevels(coin.price, direction, type, atrVal, supportVal, resistanceVal);
 
     // Z-Score من الإطار اليومي
     const d1Analysis = mtf?.timeframes?.find(t => t.tf === '1D')?.analysis;
@@ -904,7 +929,7 @@ async function analyzeOpportunity(coin, type, onChain) {
       name: coin.name, rank: coin.rank, price: coin.price,
       change24h: coin.change24h, change7d: coin.change7d,
       volume24h: coin.volume24h, marketCap: coin.marketCap,
-      direction, confidence, scanConfidence: confidence,
+      direction, confidence: adjustedConfidence, scanConfidence: adjustedConfidence,
       target, stopLoss, riskReward: rr,
       mtfAlignment: mtf?.alignment || 0,
       dominantTrend: mtf?.dominantTrend,
@@ -915,12 +940,25 @@ async function analyzeOpportunity(coin, type, onChain) {
   } catch { return null; }
 }
 
-function calculateLevels(price, direction, type) {
+function calculateLevels(price, direction, type, atr = 0, support = 0, resistance = 0) {
   // Spot فقط — Long دائماً
-  if (true) {
-    return { target: price * (type === 'daily' ? 1.12 : 1.25), stopLoss: price * (type === 'daily' ? 0.97 : 0.93) };
-  }
-  return { target: price * (type === 'daily' ? 0.88 : 0.75), stopLoss: price * (type === 'daily' ? 1.03 : 1.07) };
+  // R/R ديناميكي مبني على ATR + هيكل السعر الحقيقي
+  const atrMultiplier = type === 'daily' ? 1.5 : 2.5;
+  const atrValue = atr > 0 ? atr : price * (type === 'daily' ? 0.025 : 0.04); // ATR تقديري
+
+  // وقف الخسارة: تحت آخر دعم أو 1.5x ATR
+  const stopFromATR = price - (atrValue * atrMultiplier);
+  const stopFromSupport = support > 0 && support < price ? support * 0.995 : stopFromATR;
+  const stopLoss = Math.max(stopFromATR, stopFromSupport, price * (type === 'daily' ? 0.94 : 0.88));
+
+  // الهدف: أقرب مقاومة أو 3x مسافة الوقف (R/R ≥ 2)
+  const riskDist = price - stopLoss;
+  const targetFromRR = price + (riskDist * (type === 'daily' ? 2.5 : 3.5)); // R/R هدف
+  const targetFromRes = resistance > 0 && resistance > price ? resistance * 0.995 : targetFromRR;
+  // الهدف = الأقل بين المقاومة و R/R لضمان واقعية
+  const target = Math.min(targetFromRR, targetFromRes > price ? targetFromRes : targetFromRR);
+
+  return { target, stopLoss };
 }
 
 function getDefaultCoins() {
@@ -1068,7 +1106,7 @@ async function getFearGreedIndex() {
 }
 
 async function getBTCDominance() {
-  const cacheKey = 'btc_dominance';
+  const cacheKey = 'btc_dominance_v2';
   const cached = await getCached(cacheKey);
   if (cached) return cached;
   try {
@@ -1077,11 +1115,32 @@ async function getBTCDominance() {
     if (btc && btc.marketCap) {
       const totalMcap = coins.reduce(function(s, c) { return s + (c.marketCap || 0); }, 0);
       const dom = totalMcap > 0 ? parseFloat((btc.marketCap / totalMcap * 100).toFixed(1)) : 60.0;
-      await setCache(cacheKey, dom, 3600);
-      return dom;
+      // إشارة نصية واضحة بدل الفراغ
+      let signal, altcoinBias;
+      if (dom >= 65) {
+        signal = 'هيمنة مرتفعة جداً — ضغط على Altcoins';
+        altcoinBias = 'bearish';
+      } else if (dom >= 58) {
+        signal = 'هيمنة عالية — تحذر في Altcoins';
+        altcoinBias = 'neutral';
+      } else if (dom >= 50) {
+        signal = 'هيمنة معتدلة — تأثير محدود';
+        altcoinBias = 'neutral';
+      } else if (dom >= 42) {
+        signal = 'هيمنة منخفضة — Altcoins Season قريب';
+        altcoinBias = 'bullish';
+      } else {
+        signal = 'هيمنة منخفضة جداً — Altcoin Season نشط';
+        altcoinBias = 'bullish';
+      }
+      const result = { btcDominance: dom, signal, altcoinBias, totalMarketCap: totalMcap };
+      await setCache(cacheKey, result, 3600);
+      return result;
     }
-    return 60.0;
-  } catch (e) { return 60.0; }
+    return { btcDominance: 60.0, signal: 'هيمنة معتدلة', altcoinBias: 'neutral', totalMarketCap: 0 };
+  } catch (e) {
+    return { btcDominance: 60.0, signal: 'هيمنة معتدلة', altcoinBias: 'neutral', totalMarketCap: 0 };
+  }
 }
 
 async function getFundingRate(symbol) {

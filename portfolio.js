@@ -20,8 +20,10 @@ async function openTrade(userId, tradeData) {
   const maxTrades = type === 'daily' ? 2 : 3;
   if (openTrades.length >= maxTrades) throw new Error(`الحد الأقصى للصفقات ${type === 'daily' ? 'اليومية' : 'الشهرية'} (${maxTrades}) مكتمل`);
 
-  if (type === 'daily' && openTrades.find(t => t.symbol === symbol)) {
-    throw new Error(`يوجد مركز مفتوح على ${symbol}`);
+  // منع التكرار على نفس العملة في أي نوع من الصفقات
+  const existingOnSymbol = await Trade.findOne({ userId, symbol, status: { $in: ['pending_entry', 'open'] } });
+  if (existingOnSymbol) {
+    throw new Error(`يوجد مركز مفتوح على ${symbol} — أغلق الصفقة الحالية أولاً`);
   }
 
   // حماية رأس المال
