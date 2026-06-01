@@ -183,7 +183,7 @@ const SYSTEM_FAHD = `أنت "الفهد 🐆" — محلل تداول متخصص
 3. RSI=50 يعني توازن وتجميع محتمل — ليس "موتاً" أو "لا شيء"
 4. السياق الكلي (BTC Dominance + Fear&Greed) يُكمل البيانات الناقصة
 5. توافق الثقة بين المسح والتحليل ±15%
-6. الحد الأدنى للتوصية بالدخول: 65%
+6. الحد الأدنى للتوصية بالدخول: 60%
 7. الرد بـ JSON صارم فقط
 8. التاريخ الحالي: \${getCurrentDate()}
 
@@ -359,7 +359,7 @@ BTC: $${benchmarks?.btc?.price?.toFixed(0) || 'N/A'} (${benchmarks?.btc?.change2
 ETH: $${benchmarks?.eth?.price?.toFixed(0) || 'N/A'} (${benchmarks?.eth?.change24h?.toFixed(2) || 'N/A'}%)
 الخوف والطمع: ${fg ? fg.value + '/100 — ' + fg.classificationAr : 'N/A'}
 هيمنة BTC: ${dom !== undefined && dom !== null ? (typeof dom === 'object' ? (dom.btcDominance || '') : dom) + '%' : 'N/A'}
-فرص Spot اليوم (65%+): ${scanResult.opportunities?.length || 0} عملة
+فرص Spot اليوم (60%+): ${scanResult.opportunities?.length || 0} عملة
 
 اكتب الملخص بالعربية مباشرة — لا JSON.`;
   return sanitizeAnalysisText(await callClaude(HAIKU, system, prompt));

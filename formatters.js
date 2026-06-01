@@ -66,7 +66,7 @@ ${DIVIDER}
 💼 محفظتك الافتراضية: $${(user.portfolio && user.portfolio.balance || 0).toFixed(2)}
 🤖 التحليل بـ Claude AI
 📊 مسح أكبر 100 عملة Spot بدون Stablecoins
-🎯 حد الثقة: ${user.settings?.confidenceThreshold || 65}%
+🎯 حد الثقة: ${user.settings?.confidenceThreshold || 60}%
 
 👇 اختر من القائمة`;
 }
@@ -310,7 +310,7 @@ function formatPortfolioSnapshot(snap) {
 
   msg += `\n${DIVIDER}\n`;
   msg += `⚙️ الإعدادات:\n`;
-  msg += `   حد الثقة: ${snap.settings?.confidenceThreshold || 65}%\n`;
+  msg += `   حد الثقة: ${snap.settings?.confidenceThreshold || 60}%\n`;
   msg += `   يومي: ${snap.settings?.autoTradeDaily ? 'فعال ✅' : 'موقف ⏸️'} | شهري: ${snap.settings?.autoTradeMonthly ? 'فعال ✅' : 'موقف ⏸️'}`;
   return msg;
 }
@@ -345,21 +345,31 @@ function formatPerformanceStats(stats, benchmarks) {
     if (benchmarks.btc?.change30d !== undefined) {
       const diff = totalReturn - benchmarks.btc.change30d;
       msg += `   BTC: ${fmtPct(benchmarks.btc.change30d)} | الفرق: ${fmtPct(diff)} ${diff >= 0 ? '🏆' : '📉'}\n`;
+    } else {
+      msg += `   BTC: جارٍ جلب البيانات...\n`;
     }
     if (benchmarks.eth?.change30d !== undefined) {
       const diff2 = totalReturn - benchmarks.eth.change30d;
       msg += `   ETH: ${fmtPct(benchmarks.eth.change30d)} | الفرق: ${fmtPct(diff2)} ${diff2 >= 0 ? '🏆' : '📉'}\n`;
+    } else {
+      msg += `   ETH: جارٍ جلب البيانات...\n`;
     }
     if (benchmarks.totalMarketCap) {
-      msg += `   اجمالي السوق: $${(benchmarks.totalMarketCap / 1e12).toFixed(2)}T\n`;
+      msg += `   إجمالي السوق: $${(benchmarks.totalMarketCap / 1e12).toFixed(2)}T\n`;
     }
+  } else {
+    msg += `⚔️ ${FAHD} vs السوق (30 يوم):\n`;
+    msg += `   الفهد 🐆: ${fmtPct(totalReturn)}\n`;
+    msg += `   BTC/ETH: غير متاح — تحقق من الاتصال\n`;
   }
 
   if (stats.recentTrades?.length) {
     msg += `\n📋 آخر 5 صفقات:\n`;
     stats.recentTrades.slice(0, 5).forEach((t, i) => {
-      const icon = t.status === 'cancelled' ? '⏱️' : t.pnl >= 0 ? '✅' : '❌';
-      msg += `   ${i+1}. ${t.symbol} ${icon} $${Math.abs(t.pnl || 0).toFixed(2)}\n`;
+      const icon = t.status === 'cancelled' ? '⏱️' : (t.pnl || 0) >= 0 ? '✅' : '❌';
+      const pnlSign = (t.pnl || 0) >= 0 ? '+' : '-';
+      const pnlAbs = Math.abs(t.pnl || 0).toFixed(2);
+      msg += `   ${i+1}. ${t.symbol} ${icon} $${pnlSign}${pnlAbs}\n`;
     });
   }
 
@@ -434,7 +444,7 @@ function formatStrategy(user) {
   const minPos = s.minPositionPct || 5;
   const drawdownLimit = s.drawdownThreshold || 6;
   let msg = `${FAHD} — الاستراتيجية الحالية\n${DIVIDER}\n\n`;
-  msg += `🎯 حد الثقة: ${s.confidenceThreshold || 65}%\n\n`;
+  msg += `🎯 حد الثقة: ${s.confidenceThreshold || 60}%\n\n`;
   msg += `📅 اليومي:\n`;
   msg += `   حجم الصفقة: ${s.dailyRiskPercent || 3}% من المحفظة\n`;
   msg += `   حدود المركز: ${minPos}%–${maxPos}% من المحفظة\n`;
@@ -454,9 +464,18 @@ function formatStrategy(user) {
   msg += `   On-Chain: Fear&Greed + Funding + Dominance + Mempool\n`;
   msg += `   Backtest: 3 سنوات على العملة والسوق\n\n`;
   msg += `🛡️ حماية رأس المال:\n`;
-  msg += `   Drawdown ${drawdownLimit}% → إيقاف تلقائي للتداول\n`;
-  msg += `   ${s.strictMode ? '⚠️ وضع التشديد نشط حالياً' : '✅ الوضع العادي'}\n\n`;
-  msg += `🤖 التعلم الذاتي:\n`;
+  msg += `   انخفاض ${drawdownLimit}% → إيقاف تلقائي للتداول\n`;
+  if (s.strictMode) {
+    const activatedAt = s.strictModeActivatedAt
+      ? new Date(s.strictModeActivatedAt).toLocaleDateString('ar-SA')
+      : 'غير محدد';
+    msg += `   ⚠️ وضع التشديد نشط منذ: ${activatedAt}\n`;
+    msg += `   📉 حجم الصفقة مخفّض 50% تلقائياً\n`;
+    msg += `   ✅ يُلغى بعد 5 صفقات رابحة متتالية\n`;
+  } else {
+    msg += `   ✅ الوضع العادي — أداء طبيعي\n`;
+  }
+  msg += `\n🤖 التعلم الذاتي:\n`;
   msg += `   3 خسائر متتالية أو ${drawdownLimit}% خسارة = تشديد تلقائي\n`;
   msg += `${DIVIDER}`;
   return msg;

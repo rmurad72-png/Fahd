@@ -89,18 +89,18 @@ async function start() {
   // ==================== توحيد إعدادات المستخدمين ====================
   setTimeout(async () => {
     try {
-      // توحيد confidenceThreshold — الجميع يبدأ بـ 65%
-      // توحيد الجميع على 65% — الحد المتفق عليه
+      // ✅ تحديث عتبة الثقة لـ 60% لجميع المستخدمين
       const r1 = await User.updateMany(
         { 'settings.confidenceThreshold': { $exists: false } },
-        { $set: { 'settings.confidenceThreshold': 65 } }
+        { $set: { 'settings.confidenceThreshold': 60 } }
       );
+      // تحديث من كانت عتبته أعلى من 60% (عدا وضع التشديد)
       const r2 = await User.updateMany(
-        { 'settings.confidenceThreshold': { $gt: 65 } },
-        { $set: { 'settings.confidenceThreshold': 65 } }
+        { 'settings.confidenceThreshold': { $gt: 60 }, 'settings.strictMode': { $ne: true } },
+        { $set: { 'settings.confidenceThreshold': 60 } }
       );
       if (r1.modifiedCount + r2.modifiedCount > 0) {
-        logger.info('🐆 Migration: توحيد confidenceThreshold لـ ' + (r1.modifiedCount + r2.modifiedCount) + ' مستخدم');
+        logger.info('🐆 Migration: تحديث confidenceThreshold → 60% لـ ' + (r1.modifiedCount + r2.modifiedCount) + ' مستخدم');
       }
     } catch (e) { logger.warn('Migration:', e.message); }
   }, 8000);
@@ -261,6 +261,20 @@ bot.onText(/\/analyze(?:\s+(\S+))?|تحليل عميق/, async (msg, match) => {
       backtest: backtest.status === 'fulfilled' ? backtest.value : {},
       onChain: onChain.status === 'fulfilled' ? onChain.value : {}
     };
+    // ✅ فحص بيانات صفرية قبل التحليل العميق
+    const mtfDetails = marketData.mtf?.tfDetails || [];
+    const rsi50All = mtfDetails.length >= 2 &&
+      mtfDetails.filter(t => Math.abs((t.rsi || 50) - 50) < 0.5).length >= mtfDetails.length;
+    const priceZero = !price || price <= 0;
+    const volZero = (coinData.volume24h || 0) < 10000;
+    const changeZero = Math.abs(coinData.change24h || 0) < 0.001;
+    if (priceZero || (rsi50All && changeZero && volZero)) {
+      await bot.deleteMessage(msg.chat.id, loadMsg.message_id).catch(() => {});
+      await bot.sendMessage(msg.chat.id,
+        `🐆 الفهد — تحليل ${symbol}\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ بيانات ${symbol} غير متوفرة أو معطلة حالياً\n\nالسبب: السعر أو الحجم أو المؤشرات الفنية غير مكتملة\n\n💡 تحقق من العملة مباشرة على منصة التداول`
+      );
+      return;
+    }
     const analysis = await deepAnalysis(symbol, marketData, 'daily');
     await bot.deleteMessage(msg.chat.id, loadMsg.message_id);
     // بناء أزرار التحليل — زر التنفيذ يظهر دائماً عند long/short/wait
@@ -678,7 +692,7 @@ bot.on('callback_query', async (query) => {
         const oppsCount = freshScan.opportunities?.length || 0;
         const strictNote = user.settings?.strictMode ? '\n⚠️ وضع التشديد نشط — حد الثقة مرفوع تلقائياً' : '';
         const rejDetails = result.rejectionSummary ? '\n\n🔍 تفاصيل الرفض:\n' + result.rejectionSummary : '';
-        const threshold = user.settings.confidenceThreshold || 65;
+        const threshold = user.settings.confidenceThreshold || 60;
         await bot.sendMessage(userId,
           `🐆 الفهد — لم تُنفَّذ صفقات${strictNote}\n\nالسبب: ${safe(reason)}${rejDetails}\n\nالفرص المتاحة: ${oppsCount}\nحد الثقة: ${threshold}%\n\n💡 ${user.settings?.strictMode ? 'في وضع التشديد: انتظر إشارات أقوى (70%+) — الجولة التلقائية تراقب كل 4 ساعات' : 'جرب: مسح جديد بعد تحرك السوق أو انتظر الجولة التلقائية القادمة (كل 4 ساعات)'}`
         );
@@ -766,7 +780,7 @@ bot.on('callback_query', async (query) => {
     if (data.startsWith('force_execute_')) {
       const parts = data.replace('force_execute_', '').split('_');
       const sym = parts[0];
-      const conf = parseInt(parts[1]) || 65;
+      const conf = parseInt(parts[1]) || 60;
       const loadMsg = await bot.sendMessage(chatId, '🐆 الفهد يُنفذ ' + sym + ' بناءً على طلبك...');
       try {
         const freshScan = await scanMarket('daily');

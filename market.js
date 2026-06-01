@@ -895,11 +895,17 @@ async function analyzeOpportunity(coin, type, onChain) {
     // تقليل الثقة عند RSI 70-80
     const rsiPenalty = maxRSI > 75 ? 10 : maxRSI > 70 ? 5 : 0;
 
-    // ✅ فلتر البيانات الصفرية — يمنع ظهور عملات بلا سعر أو RSI=50 على كل الإطارات
-    const allRSI50 = (mtf?.tfDetails || []).length >= 2 &&
-      (mtf?.tfDetails || []).filter(t => t.rsi === 50).length >= (mtf?.tfDetails || []).length;
-    if (allRSI50 || coin.price <= 0) {
-      logger.debug(`🐆 رفض ${coin.symbol}: بيانات غير كافية (RSI=${d1RSI}, price=${coin.price})`);
+    // ✅ فلتر البيانات الصفرية — يرفض فقط إذا كانت البيانات معطلة كلياً
+    // شرط صارم: السعر صفر أو 3+ إطارات RSI=50 بالضبط مع تغير 24س = 0
+    const tfDetails = mtf?.tfDetails || [];
+    const rsi50Count = tfDetails.filter(t => Math.abs((t.rsi || 50) - 50) < 0.5).length;
+    const totalTF = tfDetails.length;
+    const priceChangeZero = Math.abs(coin.change24h || 0) < 0.001;
+    // رفض فقط إذا: السعر صفر أو (كل الإطارات RSI=50 تماماً + تغير السعر صفر)
+    const dataInvalid = coin.price <= 0 ||
+      (rsi50Count >= Math.max(totalTF, 2) && priceChangeZero && coin.volume24h < 10000);
+    if (dataInvalid) {
+      logger.debug(`🐆 رفض ${coin.symbol}: بيانات معطلة (RSI=${d1RSI}, price=${coin.price}, vol=${coin.volume24h})`);
       return null;
     }
 
