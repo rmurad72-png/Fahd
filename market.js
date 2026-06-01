@@ -882,33 +882,21 @@ async function scanMarket(type = 'daily') {
 
 async function analyzeOpportunity(coin, type, onChain) {
   try {
+    // ✅ فلتر أولي سريع — قبل جلب MTF (توفير الوقت والموارد)
+    if (coin.price <= 0 || (coin.volume24h || 0) < 50000) return null;
+
     const mtf = await getMTFAnalysis(coin.symbol + '/USDT', type);
-    // ✅ فلتر RSI التشبع الشرائي — يمنع التناقض بين المسح والتحليل العميق
-    // إذا كان RSI > 78 في الإطار اليومي أو الأسبوعي → رفض فوري
-    const d1RSI = mtf?.tfDetails?.find(t => t.tf === '1D')?.rsi || 50;
-    const h4RSI = mtf?.tfDetails?.find(t => t.tf === '4H')?.rsi || 50;
-    const maxRSI = Math.max(d1RSI, h4RSI);
-    if (maxRSI > 80) {
-      logger.debug(`🐆 رفض ${coin.symbol}: RSI ${maxRSI.toFixed(0)} تشبع شرائي`);
+    const confidence = calculateConfidence(coin, mtf, onChain, type);
+    if (confidence < 40) return null;
+
+    // ✅ فلتر RSI التشبع — فقط للقيم الحقيقية (ليست fallback=50)
+    const d1RSI = mtf?.tfDetails?.find(t => t.tf === '1D')?.rsi || 0;
+    const isRealRSI = d1RSI > 0 && Math.abs(d1RSI - 50) > 2; // RSI حقيقي ≠ fallback
+    const rsiPenalty = isRealRSI ? (d1RSI > 82 ? 15 : d1RSI > 78 ? 8 : d1RSI > 72 ? 4 : 0) : 0;
+    if (isRealRSI && d1RSI > 85) {
+      logger.debug(`🐆 رفض ${coin.symbol}: RSI حقيقي ${d1RSI.toFixed(0)} تشبع شرائي شديد`);
       return null;
     }
-    // تقليل الثقة عند RSI 70-80
-    const rsiPenalty = maxRSI > 75 ? 10 : maxRSI > 70 ? 5 : 0;
-
-    // ✅ فلتر البيانات الصفرية — يرفض فقط إذا كانت البيانات معطلة كلياً
-    // شرط صارم: السعر صفر أو 3+ إطارات RSI=50 بالضبط مع تغير 24س = 0
-    const tfDetails = mtf?.tfDetails || [];
-    const rsi50Count = tfDetails.filter(t => Math.abs((t.rsi || 50) - 50) < 0.5).length;
-    const totalTF = tfDetails.length;
-    const priceChangeZero = Math.abs(coin.change24h || 0) < 0.001;
-    // رفض فقط إذا: السعر صفر أو (كل الإطارات RSI=50 تماماً + تغير السعر صفر)
-    const dataInvalid = coin.price <= 0 ||
-      (rsi50Count >= Math.max(totalTF, 2) && priceChangeZero && coin.volume24h < 10000);
-    if (dataInvalid) {
-      logger.debug(`🐆 رفض ${coin.symbol}: بيانات معطلة (RSI=${d1RSI}, price=${coin.price}, vol=${coin.volume24h})`);
-      return null;
-    }
-
     const adjustedConfidence = Math.max(0, confidence - rsiPenalty);
 
     // استخراج ATR ومستويات الدعم/المقاومة من MTF للحساب الديناميكي

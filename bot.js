@@ -89,18 +89,16 @@ async function start() {
   // ==================== توحيد إعدادات المستخدمين ====================
   setTimeout(async () => {
     try {
-      // ✅ تحديث عتبة الثقة لـ 60% لجميع المستخدمين
+      // ✅ تحديث جميع المستخدمين لعتبة 60% (بمن فيهم أصحاب 65%)
       const r1 = await User.updateMany(
-        { 'settings.confidenceThreshold': { $exists: false } },
+        { $or: [
+          { 'settings.confidenceThreshold': { $exists: false } },
+          { 'settings.confidenceThreshold': { $gt: 60 }, 'settings.strictMode': { $ne: true } }
+        ]},
         { $set: { 'settings.confidenceThreshold': 60 } }
       );
-      // تحديث من كانت عتبته أعلى من 60% (عدا وضع التشديد)
-      const r2 = await User.updateMany(
-        { 'settings.confidenceThreshold': { $gt: 60 }, 'settings.strictMode': { $ne: true } },
-        { $set: { 'settings.confidenceThreshold': 60 } }
-      );
-      if (r1.modifiedCount + r2.modifiedCount > 0) {
-        logger.info('🐆 Migration: تحديث confidenceThreshold → 60% لـ ' + (r1.modifiedCount + r2.modifiedCount) + ' مستخدم');
+      if (r1.modifiedCount > 0) {
+        logger.info('🐆 Migration: تحديث confidenceThreshold → 60% لـ ' + r1.modifiedCount + ' مستخدم');
       }
     } catch (e) { logger.warn('Migration:', e.message); }
   }, 8000);
@@ -261,17 +259,14 @@ bot.onText(/\/analyze(?:\s+(\S+))?|تحليل عميق/, async (msg, match) => {
       backtest: backtest.status === 'fulfilled' ? backtest.value : {},
       onChain: onChain.status === 'fulfilled' ? onChain.value : {}
     };
-    // ✅ فحص بيانات صفرية قبل التحليل العميق
-    const mtfDetails = marketData.mtf?.tfDetails || [];
-    const rsi50All = mtfDetails.length >= 2 &&
-      mtfDetails.filter(t => Math.abs((t.rsi || 50) - 50) < 0.5).length >= mtfDetails.length;
+    // ✅ فحص بيانات صفرية كلية قبل التحليل العميق
+    // يرفض فقط: سعر=0 أو عملة بلا تداول فعلي (حجم < 1000 USDT)
     const priceZero = !price || price <= 0;
-    const volZero = (coinData.volume24h || 0) < 10000;
-    const changeZero = Math.abs(coinData.change24h || 0) < 0.001;
-    if (priceZero || (rsi50All && changeZero && volZero)) {
+    const totallyDead = (coinData.volume24h || 0) < 1000 && Math.abs(coinData.change24h || 0) < 0.0001;
+    if (priceZero || totallyDead) {
       await bot.deleteMessage(msg.chat.id, loadMsg.message_id).catch(() => {});
       await bot.sendMessage(msg.chat.id,
-        `🐆 الفهد — تحليل ${symbol}\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ بيانات ${symbol} غير متوفرة أو معطلة حالياً\n\nالسبب: السعر أو الحجم أو المؤشرات الفنية غير مكتملة\n\n💡 تحقق من العملة مباشرة على منصة التداول`
+        `🐆 الفهد — تحليل ${symbol}\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ بيانات ${symbol} غير متوفرة حالياً\n\nالسبب: لا يوجد تداول فعلي أو السعر غير محدد\n\n💡 تحقق من العملة مباشرة على منصة التداول`
       );
       return;
     }
