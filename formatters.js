@@ -426,16 +426,21 @@ function formatWeeklyReport(stats, snapshot, weekData, benchmarks) {
 // ==================== STRATEGY ====================
 function formatStrategy(user) {
   const s = user.settings;
+  const maxPos = s.maxPositionPct || 10;
+  const minPos = s.minPositionPct || 5;
+  const drawdownLimit = s.drawdownThreshold || 6;
   let msg = `${FAHD} — الاستراتيجية الحالية\n${DIVIDER}\n\n`;
   msg += `🎯 حد الثقة: ${s.confidenceThreshold || 65}%\n\n`;
   msg += `📅 اليومي:\n`;
   msg += `   حجم الصفقة: ${s.dailyRiskPercent || 3}% من المحفظة\n`;
+  msg += `   حدود المركز: ${minPos}%–${maxPos}% من المحفظة\n`;
   msg += `   هدف: متحرك 5-20% (Trailing Stop 50%)\n`;
   msg += `   وقف: ${s.dailyStopLoss || 3}% + Trailing تلقائي\n`;
   msg += `   المدة: ${s.dailyMaxDays || 11} يوم\n`;
   msg += `   انتهاء الدخول: 24 ساعة\n\n`;
   msg += `📆 الشهري:\n`;
   msg += `   حجم اجمالي: ${s.monthlyRiskPercent || 15}% من المحفظة\n`;
+  msg += `   حدود المركز: ${minPos}%–15% من المحفظة\n`;
   msg += `   دخول: 40% + 30% + 30%\n`;
   msg += `   خروج: 40% + 50% + 10%\n`;
   msg += `   المدة: 30 يوم\n`;
@@ -444,8 +449,11 @@ function formatStrategy(user) {
   msg += `   MTF: 1H+4H+1D (يومي) | 1D+3D+1W (شهري)\n`;
   msg += `   On-Chain: Fear&Greed + Funding + Dominance + Mempool\n`;
   msg += `   Backtest: 3 سنوات على العملة والسوق\n\n`;
+  msg += `🛡️ حماية رأس المال:\n`;
+  msg += `   Drawdown ${drawdownLimit}% → إيقاف تلقائي للتداول\n`;
+  msg += `   ${s.strictMode ? '⚠️ وضع التشديد نشط حالياً' : '✅ الوضع العادي'}\n\n`;
   msg += `🤖 التعلم الذاتي:\n`;
-  msg += `   3 خسائر متتالية او 10% خسارة = تشديد تلقائي\n`;
+  msg += `   3 خسائر متتالية أو ${drawdownLimit}% خسارة = تشديد تلقائي\n`;
   msg += `${DIVIDER}`;
   return msg;
 }

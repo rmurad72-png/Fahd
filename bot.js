@@ -143,6 +143,18 @@ async function handle(msg, fn) {
   }
 }
 
+// ==================== رسالة الأمر غير المتاح في الباقة ====================
+async function notifyUnavailable(chatId, commandName, requiredTier = 'مدفوعة') {
+  const tierEmojis = { 'أساسية': '🥉', 'فضية': '🥈', 'ذهبية': '🥇', 'ماسية': '💎', 'مدفوعة': '💳' };
+  const emoji = tierEmojis[requiredTier] || '💳';
+  await bot.sendMessage(chatId,
+    `🐆 الفهد — الأمر غير متاح\n━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `الأمر "${commandName}" يتطلب اشتراكاً ${emoji} ${requiredTier}\n\n` +
+    `باقتك الحالية لا تشمل هذه الميزة.\n\n` +
+    `للترقية أو الاستفسار تواصل مع الإدارة.`
+  );
+}
+
 // ==================== COMMANDS ====================
 bot.onText(/^\/start$|^\/menu$|^\/home$/, async (msg) => {
   await handle(msg, async () => {
@@ -209,9 +221,9 @@ bot.onText(/\/scan|مسح الاسواق/, async (msg) => {
       ].filter(row => row.length > 0)
     } : undefined;
 
-    // حفظ الفرص الإضافية مؤقتاً (10 دقائق) — بـ chat.id للتطابق مع callback
+    // حفظ الفرص الإضافية مؤقتاً (10 دقائق) — String دائماً لتجنب type mismatch
     if (extraOpps > 0) {
-      const scanChatId = msg.chat.id;
+      const scanChatId = String(msg.chat.id);
       pendingScanOpps.set(scanChatId, opportunities.slice(5));
       setTimeout(() => pendingScanOpps.delete(scanChatId), 10 * 60 * 1000);
     }
@@ -584,8 +596,10 @@ bot.on('callback_query', async (query) => {
 
     // عرض الفرص الإضافية
     if (data === 'show_more_opps') {
-      // يبحث بـ chatId أولاً (مسح يدوي) ثم userId (مجدول)
-      let extras = pendingScanOpps.get(chatId) || pendingScanOpps.get(Number(chatId)) || pendingScanOpps.get(userId) || [];
+      // تطبيع المفتاح: String دائماً لتجنب type mismatch
+      const chatKey = String(chatId);
+      const userKey = String(userId);
+      let extras = pendingScanOpps.get(chatKey) || pendingScanOpps.get(userKey) || [];
       if (!extras.length) {
         await bot.answerCallbackQuery(query.id, { text: 'انتهت صلاحية الفرص — امسح مجدداً' });
         return;
@@ -603,18 +617,19 @@ bot.on('callback_query', async (query) => {
         text: 'تحليل ' + o.symbol + ' (' + o.confidence + '%)',
         callback_data: 'analyze_' + o.symbol.replace('/USDT','').replace('/','')
       }]));
-      pendingScanOpps.delete(chatId);
-      pendingScanOpps.delete(Number(chatId));
-      pendingScanOpps.delete(userId);
+      // ✅ إضافة زر التنفيذ — كان ناقصاً
+      extraButtons.push([{ text: '⚡ تنفيذ الصفقات الآن', callback_data: 'execute_now' }]);
+      // حذف المفتاحين
+      pendingScanOpps.delete(chatKey);
+      pendingScanOpps.delete(userKey);
       await bot.answerCallbackQuery(query.id);
-      await bot.sendMessage(chatId, extraMsg, { reply_markup: { inline_keyboard: extraButtons } });
+      await bot.sendMessage(String(chatId), extraMsg, { reply_markup: { inline_keyboard: extraButtons } });
       return;
     }
 
     if (data === 'dismiss_more_opps') {
-      pendingScanOpps.delete(chatId);
-      pendingScanOpps.delete(Number(chatId));
-      pendingScanOpps.delete(userId);
+      pendingScanOpps.delete(String(chatId));
+      pendingScanOpps.delete(String(userId));
       await bot.answerCallbackQuery(query.id, { text: '✅ تم — الفهد يراقب تلقائياً' });
       return;
     }

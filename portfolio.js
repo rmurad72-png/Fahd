@@ -28,11 +28,30 @@ async function openTrade(userId, tradeData) {
   const capCheck = await checkCapitalProtection(userId, user);
   if (capCheck.blocked) throw new Error(`حماية رأس المال: ${capCheck.reason}`);
 
+  // ==================== فلتر حد المركز (5-10% من الكاش) ====================
+  const maxPositionPct = type === 'daily' ? 10 : 15; // يومي: 10%، شهري: 15%
+  const minPositionPct = 5; // حد أدنى 5% لضمان جدوى الصفقة
+  const currentOpenTrades = await Trade.find({ userId, status: { $in: ['open', 'pending_entry'] } });
+  const allocatedCapital = currentOpenTrades.reduce((s, t) => s + (t.sizeUSDT || 0), 0);
+  const availableCash = user.portfolio.balance;
+  const portfolioTotal = availableCash + allocatedCapital;
+  // حد أقصى لكل مركز = maxPositionPct% من إجمالي المحفظة
+  const maxPositionUSDT = (portfolioTotal * maxPositionPct) / 100;
+  const minPositionUSDT = (portfolioTotal * minPositionPct) / 100;
+
   // تطبيق riskMultiplier — في وضع التشديد يُخفض الحجم تلقائياً
   const riskMultiplier = user.settings.riskMultiplier || 1.0;
   const baseRiskPercent = type === 'daily' ? user.settings.dailyRiskPercent : user.settings.monthlyRiskPercent;
-  const sizePercent = parseFloat((baseRiskPercent * riskMultiplier).toFixed(2));
-  const sizeUSDT = (user.portfolio.balance * sizePercent) / 100;
+  const rawSizePercent = parseFloat((baseRiskPercent * riskMultiplier).toFixed(2));
+  const rawSizeUSDT = (availableCash * rawSizePercent) / 100;
+
+  // تطبيق الحدود: لا يتجاوز maxPositionUSDT ولا يقل عن minPositionUSDT
+  const clampedUSDT = Math.min(rawSizeUSDT, maxPositionUSDT, availableCash * 0.95);
+  if (clampedUSDT < minPositionUSDT) {
+    throw new Error(`حجم الصفقة ($${clampedUSDT.toFixed(0)}) أقل من الحد الأدنى ($${minPositionUSDT.toFixed(0)}) — ${minPositionPct}% من المحفظة`);
+  }
+  const sizeUSDT = clampedUSDT;
+  const sizePercent = parseFloat(((sizeUSDT / availableCash) * 100).toFixed(2));
 
   const priceData = await getVerifiedPrice(symbol);
   const entryPrice = tradeData.currentPrice || priceData.price;
@@ -304,12 +323,12 @@ async function checkCapitalProtection(userId, user) {
   }
   const totalValue = current + openValue;
   const drawdown = ((peak - totalValue) / peak) * 100;
-  if (drawdown >= 10) {
+  if (drawdown >= 6) {
     await User.updateOne({ telegramId: userId }, {
       $set: { 'settings.autoTradeDaily': false, 'settings.autoTradeMonthly': false }
     });
     logger.warn(`🛡️ حماية رأس المال: ${userId} — انخفاض ${(drawdown || 0).toFixed(1)}%`);
-    return { blocked: true, reason: `انخفاض ${(drawdown || 0).toFixed(1)}% من الذروة (حد 10%) — تم إيقاف التداول الآلي`, drawdown };
+    return { blocked: true, reason: `انخفاض ${(drawdown || 0).toFixed(1)}% من الذروة (حد 6%) — تم إيقاف التداول الآلي`, drawdown };
   }
   return { blocked: false, drawdown };
 }
@@ -452,7 +471,7 @@ module.exports = {
 // ==================== AUTO-STRICTENING ====================
 /**
  * التشديد التلقائي — الفهد v3
- * يتفعّل عند: 3 خسائر متتالية خلال 30 يوم، أو 10% خسارة، أو Drawdown > 12%
+ * يتفعّل عند: 3 خسائر متتالية خلال 30 يوم، أو 10% خسارة، أو Drawdown > 8%
  * يُلغى عند: 5 صفقات رابحة خلال 30 يوم، أو استعادة 50% من الخسارة
  */
 async function checkAutoStrictening(userId, bot) {
@@ -485,7 +504,7 @@ async function checkAutoStrictening(userId, bot) {
     // ============ شروط التفعيل ============
     const trigger3Losses = consecutive >= 3;
     const trigger10PctLoss = pnlPct30 <= -10;
-    const trigger12Drawdown = drawdown >= 12;
+    const trigger12Drawdown = drawdown >= 8; // تشديد مبكر عند 8%، حماية كاملة عند 6%
     const shouldActivate = !isStrict && (trigger3Losses || trigger10PctLoss || trigger12Drawdown);
 
     // ============ شروط الإلغاء ============

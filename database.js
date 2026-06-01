@@ -45,6 +45,11 @@ const UserSchema = new mongoose.Schema({
     strictMode: { type: Boolean, default: false },
     strictModeActivatedAt: { type: Date, default: null },
     riskMultiplier: { type: Number, default: 1.0 }, // 1.0 = عادي، 0.5 = مشدّد
+    // ==================== حد المركز (جديد) ====================
+    maxPositionPct: { type: Number, default: 10 },   // حد أقصى لكل مركز (% من المحفظة)
+    minPositionPct: { type: Number, default: 5 },    // حد أدنى لكل مركز (% من المحفظة)
+    // ==================== حماية رأس المال (محدّث) ====================
+    drawdownThreshold: { type: Number, default: 6 }, // drawdown يوقف التداول (كان 10، صار 6)
   },
   stats: {
     totalTrades: { type: Number, default: 0 },
