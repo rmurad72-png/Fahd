@@ -27,8 +27,8 @@ function cleanMarkdown(text) {
     .replace(/\*([^*]+)\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
     // إزالة Code blocks
-    .replace(/[\s\S]*?/g, function(m) {
-      return m.replace(/[a-z]*\n?/gi, '').replace(//g, '').trim();
+    .replace(/```[\s\S]*?```/g, function(m) {
+      return m.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim();
     })
     .replace(/`([^`]+)`/g, '$1')
     // إزالة فواصل Markdown
@@ -84,7 +84,7 @@ async function callClaude(model, system, userMsg, imageB64 = null) {
 function parseJSON(text) {
   if (!text) return null;
   try {
-    let clean = text.replace(/json\n?/gi, '').replace(/?/g, '').trim();
+    let clean = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
     const s = clean.indexOf('{'), e = clean.lastIndexOf('}');
     if (s !== -1 && e > s) return JSON.parse(clean.substring(s, e + 1));
   } catch {}
