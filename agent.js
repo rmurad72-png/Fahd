@@ -722,5 +722,6 @@ module.exports = {
   freeChatWithFahd, analyzeFeedback,
   analyzeSmartMoney, generateAIForecast,
   generateTradingPlan, analyzeMacroCorrelation,
-  generateQuantAnalysis, generateMonthlyPlan
+  generateQuantAnalysis, generateMonthlyPlan,
+  validateMarketData, sanitizeAnalysisText
 };

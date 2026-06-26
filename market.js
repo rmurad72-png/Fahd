@@ -1345,7 +1345,7 @@ module.exports = {
   getTopCoins, getVerifiedPrice, getKlines, getOKXKlines, getBinanceKlines, getExchangeKlines, getHistoricalCached, getHistoricalDaily,
   calculateZScore, interpretZScore, normalizeSymbol,
   saveDailyPrices, getPriceHistoryStats, getPriceHistoryFromDB,
-  getMTFAnalysis, runBacktest, calculateConfidence,
+  getMTFAnalysis, runBacktest, calculateConfidence, calculateLevels,
   getOKXIndicators, calcRSI, calcEMA, calcMACD, calcBollinger, calcATR,
   getFearGreedIndex, getFundingRate, getBTCDominance,
   getBTCOnChainMetrics, getMempoolData,
