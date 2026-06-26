@@ -1048,40 +1048,127 @@ async function getPriceHistoryStats() {
 async function runBacktest(symbol, direction, confidence) {
   try {
     const klines = await getHistoricalDaily(symbol, 365);
-    if (klines.length < 30) return { occurrences: 0, winRate: 0, avgReturn: 0, worstCase: 0, maxConsecLosses: 0, recentWinRate: 0, marketWinRate: 0, verdictAr: 'بيانات غير كافية', dataYears: 0 };
+    if (klines.length < 30) return {
+      occurrences: 0, winRate: 0, avgReturn: 0, worstCase: 0,
+      maxConsecLosses: 0, recentWinRate: 0, marketWinRate: 0,
+      verdictAr: 'بيانات غير كافية', dataYears: 0
+    };
 
     const closes = klines.map(k => k.close);
-    const rsiValues = calculateRSI(closes, 14);
+    const highs = klines.map(k => k.high || k.close * 1.005);
+    const lows = klines.map(k => k.low || k.close * 0.995);
     const isLong = direction !== 'short';
-    const signals = [];
 
-    for (let i = 20; i < klines.length - 5; i++) {
-      const rsi = rsiValues[i];
-      const signal = isLong ? (rsi < 40 && closes[i] > closes[i-5]) : (rsi > 60 && closes[i] < closes[i-5]);
-      if (!signal) continue;
-      const entry = closes[i];
-      const exit = closes[Math.min(i + 5, klines.length - 1)];
-      const ret = isLong ? (exit - entry) / entry * 100 : (entry - exit) / entry * 100;
-      signals.push({ ret, win: ret > 0, date: klines[i].time });
+    // ✅ حساب RSI series كاملة (ليس رقم واحد)
+    const period = 14;
+    const rsiSeries = new Array(closes.length).fill(50);
+    if (closes.length >= period + 1) {
+      // Wilder's Smoothed RSI
+      let gains = 0, losses = 0;
+      for (let i = 1; i <= period; i++) {
+        const diff = closes[i] - closes[i - 1];
+        if (diff > 0) gains += diff; else losses += Math.abs(diff);
+      }
+      let avgGain = gains / period;
+      let avgLoss = losses / period;
+      rsiSeries[period] = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+
+      for (let i = period + 1; i < closes.length; i++) {
+        const diff = closes[i] - closes[i - 1];
+        const gain = diff > 0 ? diff : 0;
+        const loss = diff < 0 ? Math.abs(diff) : 0;
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+        rsiSeries[i] = avgLoss === 0 ? 100 : parseFloat((100 - (100 / (1 + avgGain / avgLoss))).toFixed(2));
+      }
     }
 
-    if (!signals.length) return { occurrences: 0, winRate: 0, avgReturn: 0, worstCase: 0, maxConsecLosses: 0, recentWinRate: 0, marketWinRate: 0, verdictAr: 'لا إشارات', dataYears: parseFloat((klines.length / 365).toFixed(1)) };
+    // ✅ EMA20 series للتحقق من الاتجاه
+    const ema20 = new Array(closes.length).fill(0);
+    const k20 = 2 / 21;
+    ema20[19] = closes.slice(0, 20).reduce((a, b) => a + b, 0) / 20;
+    for (let i = 20; i < closes.length; i++) {
+      ema20[i] = closes[i] * k20 + ema20[i - 1] * (1 - k20);
+    }
+
+    // ✅ ATR للـ Stop Loss الديناميكي
+    const atrSeries = new Array(closes.length).fill(0);
+    for (let i = 1; i < closes.length; i++) {
+      const tr = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i-1]), Math.abs(lows[i] - closes[i-1]));
+      atrSeries[i] = i < 14 ? tr : (atrSeries[i-1] * 13 + tr) / 14;
+    }
+
+    // ==================== توليد الإشارات ====================
+    const signals = [];
+    const holdDays = 5; // فترة الاحتفاظ
+
+    for (let i = 20; i < klines.length - holdDays; i++) {
+      const rsi = rsiSeries[i];
+      const rsiPrev = rsiSeries[i - 1];
+      const price = closes[i];
+      const atr = atrSeries[i];
+
+      // ✅ شروط الإشارة المحسّنة (RSI crossing + EMA trend)
+      let signal = false;
+      if (isLong) {
+        // Long: RSI يعبر من تحت 35 للأعلى + السعر فوق EMA20
+        signal = rsiPrev < 35 && rsi >= 35 && price > ema20[i] * 0.97;
+        // أو: RSI في منطقة مبيع زائد شديد < 30
+        if (!signal) signal = rsi < 30 && rsiPrev < 30 && price > lows[i-1];
+      } else {
+        // Short: RSI يعبر من فوق 65 للأسفل
+        signal = rsiPrev > 65 && rsi <= 65 && price < ema20[i] * 1.03;
+        if (!signal) signal = rsi > 70 && rsiPrev > 70 && price < highs[i-1];
+      }
+      if (!signal) continue;
+
+      // ✅ حساب العائد مع وقف خسارة ATR-based
+      const entry = closes[i];
+      const stopLoss = isLong ? entry - (atr * 1.5) : entry + (atr * 1.5);
+      let exit = closes[Math.min(i + holdDays, klines.length - 1)];
+      let stoppedOut = false;
+
+      // فحص وقف الخسارة خلال الفترة
+      for (let j = i + 1; j <= Math.min(i + holdDays, klines.length - 1); j++) {
+        if (isLong && lows[j] <= stopLoss) { exit = stopLoss; stoppedOut = true; break; }
+        if (!isLong && highs[j] >= stopLoss) { exit = stopLoss; stoppedOut = true; break; }
+      }
+
+      const ret = isLong ? (exit - entry) / entry * 100 : (entry - exit) / entry * 100;
+      signals.push({ ret, win: ret > 0, date: klines[i].time, stoppedOut, rsiAtEntry: rsi });
+    }
+
+    if (!signals.length) return {
+      occurrences: 0, winRate: 0, avgReturn: 0, worstCase: 0,
+      maxConsecLosses: 0, recentWinRate: 0, marketWinRate: 0,
+      verdictAr: 'لا إشارات كافية في الفترة المتاحة',
+      dataYears: parseFloat((klines.length / 365).toFixed(1))
+    };
 
     const wins = signals.filter(s => s.win).length;
     const winRate = parseFloat((wins / signals.length * 100).toFixed(1));
     const avgReturn = parseFloat((signals.reduce((a, s) => a + s.ret, 0) / signals.length).toFixed(2));
-    const rets = signals.map(function(s) { return s.ret; });
-    const worstCase = rets.length ? parseFloat(Math.min.apply(null, rets).toFixed(2)) : 0;
+    const rets = signals.map(s => s.ret);
+    const worstCase = parseFloat(Math.min(...rets).toFixed(2));
+    const bestCase = parseFloat(Math.max(...rets).toFixed(2));
     let maxConsec = 0, curConsec = 0;
     for (const s of signals) { curConsec = s.win ? 0 : curConsec + 1; maxConsec = Math.max(maxConsec, curConsec); }
     const recent = signals.slice(-10);
-    const recentWinRate = parseFloat((recent.filter(s => s.win).length / recent.length * 100).toFixed(1));
-    const verdict = winRate >= 60 ? 'ممتاز' : winRate >= 50 ? 'جيد' : winRate >= 40 ? 'متوسط' : 'ضعيف';
+    const recentWinRate = recent.length ? parseFloat((recent.filter(s => s.win).length / recent.length * 100).toFixed(1)) : 0;
+    const stoppedCount = signals.filter(s => s.stoppedOut).length;
+    const verdict = winRate >= 65 ? 'ممتاز' : winRate >= 55 ? 'جيد' : winRate >= 45 ? 'متوسط' : 'ضعيف';
 
-    return { occurrences: signals.length, winRate, avgReturn, worstCase, maxConsecLosses: maxConsec, recentWinRate, marketWinRate: winRate, verdictAr: verdict, dataYears: parseFloat((klines.length / 365).toFixed(1)) };
+    return {
+      occurrences: signals.length, winRate, avgReturn, worstCase, bestCase,
+      maxConsecLosses: maxConsec, recentWinRate, marketWinRate: winRate,
+      stoppedOutRate: parseFloat((stoppedCount / signals.length * 100).toFixed(1)),
+      verdictAr: verdict,
+      dataYears: parseFloat((klines.length / 365).toFixed(1))
+    };
+
   } catch (e) {
     logger.debug('Backtest فشل ' + symbol + ': ' + e.message);
-    return { occurrences: 0, winRate: 0, avgReturn: 0, worstCase: 0, maxConsecLosses: 0, recentWinRate: 0, marketWinRate: 0, verdictAr: 'خطأ', dataYears: 0 };
+    return { occurrences: 0, winRate: 0, avgReturn: 0, worstCase: 0, maxConsecLosses: 0, recentWinRate: 0, marketWinRate: 0, verdictAr: 'خطأ في الحساب', dataYears: 0 };
   }
 }
 

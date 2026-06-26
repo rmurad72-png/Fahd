@@ -876,12 +876,21 @@ bot.on('callback_query', async (query) => {
       const sym = data.replace('forecast_', '');
       const loadMsg = await bot.sendMessage(userId, `🐆 توقع AI لـ ${sym}...`);
       try {
-        const [coins, bt, mtf] = await Promise.allSettled([getTopCoins(), runBacktest(sym+'/USDT','long',70), getMTFAnalysis(sym+'/USDT','daily')]);
-        const coinData = (coins.value||[]).find(c=>c.symbol===sym)||{symbol:sym};
-        const forecast = await generateAIForecast(sym, {...coinData, zScore: mtf.value && mtf.value.zScore}, bt.value, mtf.value||{});
-        await bot.deleteMessage(userId, loadMsg.message_id).catch(()=>{});
+        const [coins, bt, mtf] = await Promise.allSettled([
+          getTopCoins(),
+          runBacktest(sym + '/USDT', 'long', 70),
+          getMTFAnalysis(sym + '/USDT', 'daily')
+        ]);
+        let coinData = (coins.value || []).find(c => c.symbol === sym) || null;
+        // ✅ fallback: جلب السعر الحقيقي إذا لم توجد العملة في Top 100
+        if (!coinData || !coinData.price) {
+          const vp = await getVerifiedPrice(sym + '/USDT').catch(() => null);
+          coinData = { symbol: sym, price: vp?.price || 0, change24h: vp?.change24h || 0, rank: 99 };
+        }
+        const forecast = await generateAIForecast(sym, { ...coinData, zScore: mtf.value?.zScore }, bt.value, mtf.value || {});
+        await bot.deleteMessage(userId, loadMsg.message_id).catch(() => {});
         await sendSequence(bot, userId, fmtLongAnalysis('AI Forecast', '🪙 ' + sym, forecast || ''));
-      } catch(e) { await bot.editMessageText('فشل التوقع', {chat_id: userId, message_id: loadMsg.message_id}).catch(()=>{}); }
+      } catch (e) { await bot.editMessageText('فشل التوقع', { chat_id: userId, message_id: loadMsg.message_id }).catch(() => {}); }
     }
 
     // Smart Money callback

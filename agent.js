@@ -218,16 +218,17 @@ async function deepAnalysis(symbol, marketData, type = 'daily') {
   const zAction = marketData.zInterpret?.action || 'N/A';
 
   // تفاصيل Backtest المحسّن
-  const backtestSection = backtest ? `
-📉 Backtest (${backtest.dataYears ? (backtest.dataYears || 0).toFixed(1) + ' سنة' : '3 سنوات'}):
-- إشارات تم اختبارها: ${backtest.occurrences || 0} مرة
-- معدل الفوز: ${backtest.winRate !== undefined ? backtest.winRate + '%' : 'N/A'}
-- متوسط العائد لكل صفقة: ${backtest.avgReturn !== undefined ? backtest.avgReturn + '%' : 'N/A'}
-- أسوأ خسارة: ${backtest.worstCase !== undefined ? backtest.worstCase + '%' : 'N/A'}
-- أداء آخر 3 أشهر: ${backtest.recentWinRate !== undefined ? backtest.recentWinRate + '%' : 'N/A'}
-- أقصى خسائر متتالية: ${backtest.maxConsecLosses || 'N/A'}
-- مقارنة بالسوق (BTC+ETH): ${backtest.marketWinRate !== undefined ? backtest.marketWinRate + '%' : 'N/A'}
-- الحكم التاريخي: ${backtest.verdictAr || 'محايد'}` : '📉 Backtest: غير متوفر';
+  const hasBacktest = backtest && backtest.occurrences > 0;
+  const backtestSection = hasBacktest ? `
+📉 الاختبار التاريخي (${backtest.dataYears ? (backtest.dataYears || 0).toFixed(1) + ' سنة' : 'N/A'}):
+- إشارات تم اختبارها: ${backtest.occurrences} مرة
+- معدل الفوز: ${backtest.winRate}% (${backtest.verdictAr})
+- متوسط العائد لكل صفقة: ${backtest.avgReturn}%
+- أفضل صفقة: ${backtest.bestCase || 'N/A'}% | أسوأ خسارة: ${backtest.worstCase}%
+- أداء آخر 10 إشارات: ${backtest.recentWinRate}%
+- أقصى خسائر متتالية: ${backtest.maxConsecLosses}
+- نسبة وقف الخسارة: ${backtest.stoppedOutRate || 0}%` :
+    `📉 الاختبار التاريخي: ${backtest && backtest.dataYears > 0 ? 'بيانات متاحة (' + backtest.dataYears + ' سنة) لكن لا إشارات كافية بهذه المعايير' : 'جارٍ بناء قاعدة البيانات التاريخية (تحتاج 30+ يوم)'}`;
 
   const prompt = `حلل هذه العملة بعمق كامل كمدير صندوق تحوط عالمي — السوق الفوري (Spot) فقط:
 
@@ -252,7 +253,7 @@ ${tfDetails}
 
 🔗 On-Chain:
 - الخوف والطمع: ${fg ? fg.value + '/100 — ' + fg.classificationAr + ' (' + fg.signal + ')' : 'غير متوفر'}
-- Funding Rate: ${fr ? (fr.rate || 0).toFixed(4) + '% — ' + fr.signalAr : 'غير متوفر'}
+- معدل التمويل: ${fr && fr.rate !== undefined ? (fr.rate || 0).toFixed(4) + '% — ' + (fr.signalAr || fr.signal || 'محايد') : 'غير متوفر في Spot'}
 - هيمنة BTC: ${dom !== undefined && dom !== null ? (typeof dom === 'object' ? (dom.btcDominance || dom.value || '') + '% — ' + (dom.signal || '') : dom + '%') : 'N/A'}
 - عناوين BTC النشطة: ${btcChain?.activeAddresses ? btcChain.activeAddresses.toLocaleString() + ' — ' + btcChain.signal : 'غير متوفر'}
 - Mempool: ${mempool ? mempool.signal : 'غير متوفر'}
