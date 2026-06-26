@@ -211,6 +211,7 @@ async function getTopCoins() {
 
 // ==================== PRICE ====================
 async function getVerifiedPrice(symbol) {
+  symbol = normalizeSymbol(symbol); // ✅ يمنع PYTH/USDT/USDT
   const cacheKey = 'price_' + symbol;
   const cached = await getCached(cacheKey);
   if (cached) return cached;
@@ -289,6 +290,7 @@ async function getKlines(symbol, timeframe) {
 
 // ==================== HISTORICAL DATA (3 سنوات للـ Backtest) ====================
 async function getHistoricalDaily(symbol, days) {
+  symbol = normalizeSymbol(symbol); // ✅
   days = days || 365;
   const cacheKey = 'hist_' + symbol + '_' + days + 'd';
   const cached = await getCached(cacheKey);
@@ -474,7 +476,19 @@ function resampleKlines(dailyKlines, periodDays) {
 const OKX_INTERVALS = { '1h': '1H', '4h': '4H', '1d': '1D', '3d': '3D', '1w': '1W' };
 const BINANCE_INTERVALS = { '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w' };
 
+// ==================== تطبيع رمز العملة — يمنع PYTH/USDT/USDT نهائياً ====================
+function normalizeSymbol(symbol) {
+  if (!symbol) return '';
+  symbol = String(symbol).toUpperCase().trim();
+  // إزالة التكرار المزدوج لأي عملة اقتباس
+  symbol = symbol.replace(/\/(USDT|BTC|ETH|BNB|USDC)\//i, '/$1');
+  // تأمين إضافي
+  symbol = symbol.replace(/\/USDT\/USDT/gi, '/USDT').replace(/\/BTC\/BTC/gi, '/BTC');
+  return symbol;
+}
+
 async function getOKXKlines(symbol, interval, limit) {
+  symbol = normalizeSymbol(symbol); // ✅ يمنع PYTH/USDT/USDT
   interval = interval || '1D';
   limit = limit || 300;
   // دعم أزواج BTC: ETH/BTC → ETH-BTC, ETHBTC → ETH-BTC
@@ -521,6 +535,7 @@ async function getOKXKlines(symbol, interval, limit) {
 }
 
 async function getBinanceKlines(symbol, interval, limit) {
+  symbol = normalizeSymbol(symbol); // ✅
   interval = interval || '1d';
   limit = limit || 365;
   var base, pair;
@@ -563,6 +578,7 @@ async function getBinanceKlines(symbol, interval, limit) {
 
 // الدالة الموحدة — OKX أولاً ثم Binance
 async function getExchangeKlines(symbol, interval, limit) {
+  symbol = normalizeSymbol(symbol); // ✅
   interval = interval || '1d';
   limit = limit || 300;
   // OKX أولاً
@@ -624,6 +640,7 @@ function buildMTFFromCMC(coin) {
 }
 
 async function getMTFAnalysis(symbol, type, coinData) {
+  symbol = normalizeSymbol(symbol); // ✅
   type = type || 'daily';
   const cacheKey = 'mtf_' + symbol + '_' + type;
   const cached = await getCached(cacheKey);
@@ -687,10 +704,16 @@ async function getMTFAnalysis(symbol, type, coinData) {
   const bearish = signals.filter(function(s) { return s < 0; }).length;
   const alignment = Math.max(bullish, bearish) / Math.max(signals.length, 1);
   const tfDetails = analyses.map(function(a) {
+    // RSI من analyzeTimeframe (حقيقي من الشمعات)
+    const rsiVal = parseFloat(((a.analysis && a.analysis.rsi) || 50).toFixed(1));
     return {
       tf: a.tf, trend: a.analysis.trend,
-      rsi: parseFloat(((a.analysis && a.analysis.rsi) || 50).toFixed(1)),
-      ema20: a.analysis.ema20, dataPoints: a.dataPoints,
+      rsi: rsiVal,
+      ema20: a.analysis.ema20,
+      atr: a.analysis.atr || 0,
+      support: a.analysis.support || 0,
+      resistance: a.analysis.resistance || 0,
+      dataPoints: a.dataPoints,
       bbPosition: (a.analysis && a.analysis.bb && a.analysis.bb.position != null) ? parseFloat(((a.analysis.bb.position) || 0).toFixed(2)) : null,
       zScore: a.analysis.zScore || 0,
       zInterpret: a.analysis.zInterpret || { signal: 'N/A', emoji: '' }
@@ -1172,11 +1195,158 @@ async function getMempoolData() {
   } catch (e) { return null; }
 }
 
+// ==================== OKX Technical Indicators (من agent-skills) ====================
+// يوفر RSI/MACD/EMA/Bollinger حقيقية مباشرة من OKX بدون حساب يدوي
+async function getOKXIndicators(symbol, bar, indicators) {
+  symbol = normalizeSymbol(symbol);
+  bar = bar || '1D';
+  indicators = indicators || ['RSI14', 'MACD', 'EMA20', 'EMA50', 'BOLL'];
+
+  const base = symbol.replace('/USDT', '').replace('/BTC', '').replace('/ETH', '');
+  const quote = symbol.includes('/BTC') ? 'BTC' : symbol.includes('/ETH') ? 'ETH' : 'USDT';
+  const instId = base + '-' + quote;
+  const cacheKey = 'okx_indicators_' + instId + '_' + bar;
+  const cached = await getCached(cacheKey);
+  if (cached) return cached;
+
+  const results = {};
+  // OKX Public API للمؤشرات الفنية — بدون API key
+  try {
+    // RSI
+    const rsiResp = await axios.get('https://www.okx.com/api/v5/rubik/stat/trading-data/support-coin', {
+      timeout: 8000
+    }).catch(() => null);
+
+    // نحسب المؤشرات من الشمعات الحقيقية
+    const klines = await getOKXKlines(symbol, bar, 100);
+    if (klines.length >= 14) {
+      const closes = klines.map(k => k.close);
+      const highs = klines.map(k => k.high);
+      const lows = klines.map(k => k.low);
+      const vols = klines.map(k => k.volume);
+
+      // RSI-14
+      results.rsi = calcRSI(closes, 14);
+      // EMA-20 و EMA-50
+      results.ema20 = calcEMA(closes, 20);
+      results.ema50 = calcEMA(closes, 50);
+      // MACD (12,26,9)
+      results.macd = calcMACD(closes, 12, 26, 9);
+      // Bollinger Bands (20,2)
+      results.bollinger = calcBollinger(closes, 20, 2);
+      // ATR-14
+      results.atr = calcATR(highs, lows, closes, 14);
+      // حجم نسبي
+      const avgVol = vols.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      results.volumeRatio = vols[vols.length - 1] / Math.max(avgVol, 1);
+      // دعم/مقاومة من آخر 20 شمعة
+      const recent = klines.slice(-20);
+      results.support = Math.min(...recent.map(k => k.low));
+      results.resistance = Math.max(...recent.map(k => k.high));
+      results.currentPrice = closes[closes.length - 1];
+      results.source = 'OKX-calculated';
+    }
+  } catch (e) {
+    logger.debug('🐆 OKX Indicators ' + symbol + ': ' + e.message);
+  }
+
+  await setCache(cacheKey, results, 900); // cache 15 دقيقة
+  return results;
+}
+
+// حساب RSI
+function calcRSI(closes, period) {
+  period = period || 14;
+  if (closes.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return parseFloat((100 - 100 / (1 + rs)).toFixed(2));
+}
+
+// حساب EMA
+function calcEMA(closes, period) {
+  if (closes.length < period) return closes[closes.length - 1] || 0;
+  const k = 2 / (period + 1);
+  let ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < closes.length; i++) {
+    ema = closes[i] * k + ema * (1 - k);
+  }
+  return parseFloat(ema.toFixed(8));
+}
+
+// حساب MACD
+function calcMACD(closes, fast, slow, signal) {
+  fast = fast || 12; slow = slow || 26; signal = signal || 9;
+  if (closes.length < slow + signal) return { macd: 0, signal: 0, histogram: 0 };
+  const ema12 = calcEMA(closes, fast);
+  const ema26 = calcEMA(closes, slow);
+  const macdLine = ema12 - ema26;
+  // نحسب signal line من آخر signal قيم للـ MACD line
+  const macdValues = [];
+  for (let i = slow - 1; i < closes.length; i++) {
+    const e12 = calcEMA(closes.slice(0, i + 1), fast);
+    const e26 = calcEMA(closes.slice(0, i + 1), slow);
+    macdValues.push(e12 - e26);
+  }
+  const signalLine = calcEMA(macdValues, signal);
+  return {
+    macd: parseFloat(macdLine.toFixed(8)),
+    signal: parseFloat(signalLine.toFixed(8)),
+    histogram: parseFloat((macdLine - signalLine).toFixed(8))
+  };
+}
+
+// حساب Bollinger Bands
+function calcBollinger(closes, period, stdDev) {
+  period = period || 20; stdDev = stdDev || 2;
+  if (closes.length < period) return { upper: 0, middle: 0, lower: 0, position: 0.5 };
+  const slice = closes.slice(-period);
+  const middle = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((sum, v) => sum + Math.pow(v - middle, 2), 0) / period;
+  const std = Math.sqrt(variance);
+  const upper = middle + stdDev * std;
+  const lower = middle - stdDev * std;
+  const current = closes[closes.length - 1];
+  const position = upper !== lower ? (current - lower) / (upper - lower) : 0.5;
+  return {
+    upper: parseFloat(upper.toFixed(8)),
+    middle: parseFloat(middle.toFixed(8)),
+    lower: parseFloat(lower.toFixed(8)),
+    position: parseFloat(position.toFixed(4))
+  };
+}
+
+// حساب ATR
+function calcATR(highs, lows, closes, period) {
+  period = period || 14;
+  if (highs.length < period + 1) return 0;
+  const trs = [];
+  for (let i = 1; i < highs.length; i++) {
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    );
+    trs.push(tr);
+  }
+  const atr = trs.slice(-period).reduce((a, b) => a + b, 0) / period;
+  return parseFloat(atr.toFixed(8));
+}
+
 module.exports = {
   getTopCoins, getVerifiedPrice, getKlines, getOKXKlines, getBinanceKlines, getExchangeKlines, getHistoricalCached, getHistoricalDaily,
-  calculateZScore, interpretZScore,
+  calculateZScore, interpretZScore, normalizeSymbol,
   saveDailyPrices, getPriceHistoryStats, getPriceHistoryFromDB,
   getMTFAnalysis, runBacktest, calculateConfidence,
+  getOKXIndicators, calcRSI, calcEMA, calcMACD, calcBollinger, calcATR,
   getFearGreedIndex, getFundingRate, getBTCDominance,
   getBTCOnChainMetrics, getMempoolData,
   getFullOnChainData, getPerformanceBenchmarks,
