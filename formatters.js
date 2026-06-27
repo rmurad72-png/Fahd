@@ -599,25 +599,49 @@ async function sendSequence(bot, chatId, messages) {
   }
 }
 
-// تقسيم نص طويل لرسائل ≤ 3800 حرف عند السطر
+// تقسيم ذكي — يحترم حد Telegram ويقطع عند الأقسام
 function splitMsg(text, maxLen) {
-  maxLen = maxLen || 3800;
-  if (!text || text.length <= maxLen) return [text || ''];
+  maxLen = maxLen || 3500;
+  if (!text) return [''];
+  text = String(text);
+  if (text.length <= maxLen) return [text];
+
+  var NL = '\n';
   var parts = [];
   var current = '';
-  var lines = text.split(String.fromCharCode(10));
+  var lines = text.split(NL);
+
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
-    var candidate = current ? current + String.fromCharCode(10) + line : line;
+    var candidate = current.length > 0 ? current + NL + line : line;
+
+    // إذا تجاوز الحد: احفظ الجزء الحالي وابدأ جديد
     if (candidate.length > maxLen) {
       if (current.trim()) parts.push(current.trim());
-      current = line;
+      // إذا كان السطر نفسه أطول من maxLen: قطعه
+      if (line.length > maxLen) {
+        var chunks = line.match(new RegExp('.{1,' + maxLen + '}', 'g')) || [line];
+        for (var ci = 0; ci < chunks.length - 1; ci++) parts.push(chunks[ci]);
+        current = chunks[chunks.length - 1];
+      } else {
+        current = line;
+      }
     } else {
-      current = candidate;
+      // نقطة قطع اختيارية: قبل قسم جديد إذا تجاوزنا 60% من الحد
+      var isSectionStart = line.trim().length > 0 && (
+        /^\d+[.\)️⃣]/.test(line.trim()) ||
+        /^[🔴🟢🟡🎯📊💡⚔️📈📉🛡️🤖]/.test(line.trim())
+      );
+      if (isSectionStart && current.length > maxLen * 0.60 && current.trim()) {
+        parts.push(current.trim());
+        current = line;
+      } else {
+        current = candidate;
+      }
     }
   }
   if (current.trim()) parts.push(current.trim());
-  return parts.length ? parts : [text.substring(0, maxLen)];
+  return parts.length > 0 ? parts : [text.substring(0, maxLen)];
 }
 
 // بطاقة فرصة واحدة من المسح
@@ -670,18 +694,23 @@ function fmtAnalysisCards(analysis, symbol) {
   return [card1, card2, card3];
 }
 
-// تنسيق رسائل التحليل الطويلة كسلسلة منظمة
+// تنسيق رسائل التحليل الطويلة — تقسيم ذكي بالأقسام
 function fmtLongAnalysis(title, icon, text) {
   var NL = String.fromCharCode(10);
-  var header = '🐆 الفهد — ' + title + NL + D + NL + icon;
-  var parts = splitMsg(text, 3500);
+  var footer = NL + D + NL + '⚠️ تحليل 🐆 الفهد — ليس نصيحة مالية';
+  // حساب المساحة المتاحة للمحتوى
+  var headerText = '🐆 الفهد — ' + title + NL + D + NL + icon;
+  var availableForContent = 3800 - footer.length - headerText.length - 10;
+  var parts = splitMsg(text, availableForContent);
   var messages = [];
   for (var i = 0; i < parts.length; i++) {
-    var msg = i === 0 ? header + NL + NL + parts[i] : '(' + (i+1) + '/' + parts.length + ')' + NL + parts[i];
-    if (i === parts.length - 1) msg += NL + D + NL + '⚠️ تحليل الفهد — ليس نصيحة مالية';
-    messages.push(msg);
+    var isFirst = i === 0;
+    var isLast = i === parts.length - 1;
+    var prefix = isFirst ? headerText + NL + NL : '🐆 ' + title + ' (' + (i+1) + '/' + parts.length + ')' + NL + D + NL;
+    var suffix = isLast ? footer : '';
+    messages.push(prefix + parts[i] + suffix);
   }
-  return messages;
+  return messages.length ? messages : [headerText + NL + NL + (text || '') + footer];
 }
 
 module.exports = {

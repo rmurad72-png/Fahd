@@ -89,11 +89,11 @@ async function start() {
   // ==================== توحيد إعدادات المستخدمين ====================
   setTimeout(async () => {
     try {
-      // ✅ تحديث جميع المستخدمين لعتبة 60% (بمن فيهم أصحاب 65%)
+      // ✅ تحديث جميع المستخدمين لعتبة 60% — بغض النظر عن وضع التشديد
       const r1 = await User.updateMany(
         { $or: [
           { 'settings.confidenceThreshold': { $exists: false } },
-          { 'settings.confidenceThreshold': { $gt: 60 }, 'settings.strictMode': { $ne: true } }
+          { 'settings.confidenceThreshold': { $ne: 60 } }
         ]},
         { $set: { 'settings.confidenceThreshold': 60 } }
       );
@@ -1035,8 +1035,13 @@ bot.onText(/\/forecast(?:\s+(\S+))?/, async (msg, match) => {
     const [coins, bt, mtf] = await Promise.allSettled([
       getTopCoins(), runBacktest(symbol + '/USDT', 'long', 70), getMTFAnalysis(symbol + '/USDT', 'daily')
     ]);
-    const coinData = (coins.value||[]).find(c => c.symbol === symbol) || { symbol };
-    const forecast = await generateAIForecast(symbol, {...coinData, zScore: mtf.value && mtf.value.zScore}, bt.value, mtf.value||{});
+    // ✅ fallback للعملات خارج Top 100 كـ ETH وغيرها
+    let coinData = (coins.value || []).find(c => c.symbol === symbol) || null;
+    if (!coinData || !coinData.price) {
+      const vp = await getVerifiedPrice(symbol + '/USDT').catch(() => null);
+      coinData = { symbol, price: vp?.price || 0, change24h: vp?.change24h || 0, rank: 99 };
+    }
+    const forecast = await generateAIForecast(symbol, { ...coinData, zScore: mtf.value?.zScore }, bt.value, mtf.value || {});
     await bot.deleteMessage(msg.chat.id, loadMsg.message_id).catch(() => {});
     await sendSequence(bot, msg.chat.id, fmtLongAnalysis('AI Forecast', '🪙 ' + symbol, forecast || ''));
   });
